@@ -1,0 +1,14 @@
+# build artifacts (qmake + nmake + nvcc)
+Makefile
+Makefile.Debug
+Makefile.Release
+.qmake.stash
+debug/
+release/
+*.obj
+*.exe
+*.pdb
+*.ilk
+
+# runtime DLLs copied next to the exe by build.bat
+*.dll
