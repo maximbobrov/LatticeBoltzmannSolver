@@ -58,6 +58,13 @@ struct Params
     int    inParabolic = 0;    // inlet: parabolic profile (step scenario)
     double inY0 = 0.0, inY1 = 1.0;
 
+    // Physical scale for the axes. LBM is dimensionless (dx = dt = 1 lattice
+    // unit); the physical size is a user-chosen mapping - ONE number, the
+    // physical length of a single cell, fixes it for EVERY scenario. Default
+    // 0.1 mm/cell puts the domains at a plausible lab scale (a 128-cell box is
+    // 12.8 mm). Cycled with 'U'. Persisted across scenarios (display-only).
+    double dxPhys = 1.0e-4;    // metres per lattice cell
+
     LbmParams kp() const       // kernel-parameter view of the current state
     {
         LbmParams p;

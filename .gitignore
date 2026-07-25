@@ -12,3 +12,9 @@ release/
 
 # runtime DLLs copied next to the exe by build.bat
 *.dll
+
+# local screen recordings (host on the GitHub CDN via the web editor instead)
+*.gif
+*.mp4
+*.avi
+*.mov

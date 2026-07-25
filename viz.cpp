@@ -311,6 +311,49 @@ static void drawGridLines()
     glEnd();
 }
 
+// Format a length in metres with an adaptive unit (m / mm / um).
+static void fmtLen(double m, char* s)
+{
+    const double a = fabs(m);
+    if (a >= 1.0)       sprintf(s, "%.3g m",  m);
+    else if (a >= 1e-3) sprintf(s, "%.3g mm", m * 1e3);
+    else if (a >= 1e-6) sprintf(s, "%.3g um", m * 1e6);
+    else                sprintf(s, "%.2g mm", m * 1e3);
+}
+
+// Dimensional axis rulers around the domain: tick marks at 0..1 (5 per side)
+// labelled with the physical length cell*dxPhys, plus x/y axis titles. Drawn
+// in world (cell) coordinates - the ortho box keeps cells square, so the same
+// physical scale applies to both axes for every scenario.
+static void drawDimAxes()
+{
+    const int NX = P.NX, NY = P.NY;
+    const double u = (NX < NY ? NX : NY);
+    const double tick = 0.02 * u;
+    char s[32];
+    glColor3f(0.66f, 0.70f, 0.78f);
+    glLineWidth(1.0f);
+    glBegin(GL_LINES);
+    for (int t = 0; t <= 4; t++)
+    {
+        const double cx = NX * t / 4.0, cy = NY * t / 4.0;
+        glVertex2d(cx, 0.0);  glVertex2d(cx, -tick);       // bottom (x)
+        glVertex2d(0.0, cy);  glVertex2d(-tick, cy);       // left (y)
+    }
+    glEnd();
+    for (int t = 0; t <= 4; t++)
+    {
+        const double cx = NX * t / 4.0, cy = NY * t / 4.0;
+        fmtLen(cx * P.dxPhys, s);
+        drawText((float)(cx - 0.02 * u), (float)(-0.055 * u), GLUT_BITMAP_HELVETICA_10, s);
+        fmtLen(cy * P.dxPhys, s);
+        drawText((float)(-0.12 * u), (float)(cy - 0.008 * u), GLUT_BITMAP_HELVETICA_10, s);
+    }
+    glColor3f(0.8f, 0.84f, 0.92f);
+    drawText((float)(0.46 * NX), (float)(-0.085 * u), GLUT_BITMAP_HELVETICA_12, "x");
+    drawText((float)(-0.13 * u), (float)(0.48 * NY), GLUT_BITMAP_HELVETICA_12, "y");
+}
+
 static void drawArrow(double x, double y, double ex, double ey)
 {
     glVertex2d(x, y);
@@ -392,6 +435,7 @@ void display()
     glDisable(GL_TEXTURE_2D);
 
     if (showGrid) drawGridLines();
+    drawDimAxes();
 
     // --- domain outline + cylinder ---
     glColor3f(0.5f, 0.5f, 0.5f);
@@ -500,13 +544,22 @@ void display()
             fieldNames[fieldMode], colorGain, NX, NY, stepsPerFrame,
             useGpu ? gpuDeviceName() : "CPU", lastMLUPS);
     drawText(10, winH - 20, GLUT_BITMAP_HELVETICA_12, line);
+    {
+        char sx[32], sy[32], sd[32];
+        fmtLen(NX * P.dxPhys, sx); fmtLen(NY * P.dxPhys, sy);
+        fmtLen(P.dxPhys, sd);
+        glColor3f(0.66f, 0.72f, 0.82f);
+        sprintf(line, "domain: %s x %s   (scale %s/cell, 'U' to change; LBM is scale-free, this is a chosen mapping)",
+                sx, sy, sd);
+        drawText(10, winH - 20 - 16, GLUT_BITMAP_HELVETICA_10, line);
+    }
     sprintf(line, "%s   step %lld   tau=%.4f  nu=%.4g  u_lat=%.3f (Ma %.2f)  Re=%.0f   mass drift %.1e",
             running ? "RUNNING" : "paused (Space)", stepCount, P.tau, P.nu,
             P.ulat, P.ulat*sqrt(3.0), P.Re, massDrift());
-    drawText(10, winH - 38, GLUT_BITMAP_HELVETICA_12, line);
+    drawText(10, winH - 54, GLUT_BITMAP_HELVETICA_12, line);
     glColor3f(0.95f, 0.85f, 0.4f);
     sprintf(line, "case: %s  -  %s", scenarioName(), scenarioDesc());
-    drawText(10, winH - 56, GLUT_BITMAP_HELVETICA_12, line);
+    drawText(10, winH - 72, GLUT_BITMAP_HELVETICA_12, line);
 
     // scenario-specific metric line
     glColor3f(0.5f, 0.95f, 0.6f);
@@ -546,7 +599,7 @@ void display()
         sprintf(line, "porosity = %.3f   <u>_sup = %.2e   K = %.2f cells^2   (Darcy: K must stay put under '-'/'=')",
                 P.poroEps, K > 0.0 ? K * P.gx / P.nu : 0.0, K);
     }
-    if (line[0]) drawText(10, winH - 76, GLUT_BITMAP_HELVETICA_12, line);
+    if (line[0]) drawText(10, winH - 92, GLUT_BITMAP_HELVETICA_12, line);
 
     drawFieldColorScale(14.0f, (float)(winH - 130), 200.0f, 14.0f);
 
@@ -602,6 +655,7 @@ void display()
             {"V",     "velocity arrows",                        1,1,1},
             {"G",     "lattice grid lines",                     1,1,1},
             {"P",     "tracer particles (flow markers)",        1,1,1},
+            {"U",     "axis scale (mm per cell)",               1,1,1},
             {"LMB",   "probe cell: f_i anatomy (RMB off)",      1,1,1},
             {", .",   "arrow length -/+",                       1,1,1},
             {"[ ]",   "colour brightness -/+",                  1,1,1},

@@ -267,11 +267,25 @@ the app builds CPU-only).
 | `S` | steps per frame 1/10/50/200/1000 |
 | `V`, `,` `.` | velocity arrows on/off, arrow length |
 | `G` | lattice grid lines overlay |
+| `U` | axis scale: physical cell size (0.01 … 1 mm/cell) — see note below |
 | `P` | passive tracer particles (massless markers advected by the macro velocity — LBM itself has no particles, this is flow visualization) |
 | left click | **cell probe**: highlights the cell and draws its 9 populations as arrows of the non-equilibrium part `f_i − f_i^eq` (orange = surplus, blue = deficit; the neq part carries the viscous stress), plus a table of `f_i`, `f_i^eq`, ρ, u. Right click hides it. Works in GPU mode too (the probed state is pulled from the device). |
 | `[` `]` | color brightness |
 | `K` / `T` | validation table / self-tests (console) |
 | `ESC` | quit |
+
+**A note on physical units.** LBM is intrinsically *dimensionless*: the lattice
+spacing and time step are both 1 lattice unit, and the only thing that fixes
+the physical regime is the Reynolds number. The size of the domain in metres is
+therefore not built into the method — it is a mapping you choose by fixing the
+physical length of a single cell (`dxPhys`, in metres). One number sets the
+scale for **every** scenario at once: the domain is simply `NX·dxPhys` by
+`NY·dxPhys`. The GUI draws dimensional axis rulers (auto-switching between
+µm / mm / m) and prints the domain size in the HUD; `U` cycles `dxPhys` from
+0.01 to 1 mm per cell (default 0.1 mm/cell, so a 128-cell box is 12.8 mm). To
+tie the simulation to a real experiment, pick `dxPhys` so the characteristic
+length (channel height, cavity side, cylinder diameter) matches the real one —
+the flow itself is unchanged, only the axis labels are.
 
 ---
 

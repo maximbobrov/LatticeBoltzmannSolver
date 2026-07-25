@@ -161,6 +161,16 @@ void keyboard(unsigned char key, int, int)
         printf("steps per frame: %d\n", stepsPerFrame);
         break;
     }
+    case 'u': case 'U':                                 // cycle the physical
+    {                                                   // cell size (axis scale)
+        const double lv[5] = { 1e-5, 5e-5, 1e-4, 5e-4, 1e-3 };
+        int cur = 2;
+        for (int i = 0; i < 5; i++) if (fabs(P.dxPhys - lv[i]) < 1e-12) cur = i;
+        P.dxPhys = lv[(cur + 1) % 5];
+        printf("axis scale: %.4g mm/cell  ->  domain %.4g x %.4g mm\n",
+               P.dxPhys*1e3, P.NX*P.dxPhys*1e3, P.NY*P.dxPhys*1e3);
+        break;
+    }
     case ',': velArrowScale *= 0.8;  break;
     case '.': velArrowScale *= 1.25; break;
     case '[': colorGain *= 0.8;  break;
