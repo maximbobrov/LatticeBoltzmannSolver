@@ -8,10 +8,11 @@ validate every ingredient of the discretization. The CPU and GPU cores execute
 **literally the same code**, so they can be cross-checked to machine
 precision.
 
-Current status: all validation gates pass (`LBM --selftest`; see §3 for the
-numbers).
+Kármán vortex street:
+<img width="1919" height="1026" alt="image" src="https://github.com/user-attachments/assets/438407ae-461f-4057-890b-e052b423c00b" />
 
----
+Porous medium:
+<img width="1919" height="1027" alt="image" src="https://github.com/user-attachments/assets/9615eecd-dd9e-4a14-9979-3564fd6ff024" />
 
 ## 1. Physics and mathematics
 
@@ -209,6 +210,9 @@ scatter) with the relative L2 error and a GOOD/FAIR/POOR verdict.
 | 5 | **Cylinder in channel** — Kármán vortex street | inlet/outlet, momentum exchange, unsteady flow | St ≈ 0.164 at Re = 100 (unbounded reference; blockage D/H = 1/8), Cd ≈ 1.3–1.4 | **St = 0.1637**, Cd = 1.33, Cl_amp = 0.28 |
 | 6 | **Backward-facing step** — 1:2 sudden expansion, parabolic (developed) inflow | separation and reattachment; the parabolic-inlet machinery | reattachment length, Armaly et al. (1983): x_r/S ≈ 3 (Re=100), ≈ 5 (Re=200), ≈ 8 (Re=400); Re on the inlet hydraulic diameter | **x_r/S = 4.18** at Re = 200 |
 | 7 | **Porous medium** — random overlapping grains (fixed seed), fully periodic, force-driven | flow in complex geometry — the signature LBM application | Darcy's law: `⟨u_sup⟩ = K·g/ν`, so the permeability K must be a property of the geometry alone | K ≈ 8 cells² at ε = 0.71; K drifts **6.8 %** between τ = 0.74 and 0.62 — the known BGK+bounce-back artifact (wall position depends on τ; Pan, Luo & Miller 2006), the ready-made gate for a TRT upgrade |
+
+<img width="1919" height="1031" alt="image" src="https://github.com/user-attachments/assets/75c98d54-fe35-414c-89f4-3bda9b5435ed" />
+
 
 Additional structural gates (all in `--selftest`):
 
