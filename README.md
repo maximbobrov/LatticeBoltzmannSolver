@@ -243,30 +243,45 @@ exact solution
 \mathbf{u}(\mathbf{x},t) = U\!\begin{pmatrix}-\cos k_x x\,\sin k_y y\\[2pt]\ \ \sin k_x x\,\cos k_y y\end{pmatrix}e^{-\nu(k_x^2+k_y^2)\,t},\qquad k_x=k_y=\frac{2\pi}{N},
 ```
 
-with kinetic energy decaying as $E(t)=E_0\,e^{-2\nu(k_x^2+k_y^2)t}$. Under
-**diffusive scaling** — the relaxation time $\tau$ (hence the lattice
-viscosity) held fixed, $\mathrm{Ma}\sim 1/N$, and the integration carried to a
-fixed physical time so that the step count grows as $N^2$ — both the spatial
-truncation error and the $\mathcal{O}(\mathrm{Ma}^2)$ compressibility error are
-$\mathcal{O}(\Delta x^2)$. The relative $L_2$ velocity error and the observed
-order,
+with kinetic energy decaying as $E(t)=E_0\,e^{-2\nu(k_x^2+k_y^2)t}$. Because the
+solution is known in closed form at every instant, the **computed** field
+$\mathbf{u}_h$ can be compared directly against the **exact** field
+$\mathbf{u}_{\text{exact}}$ evaluated at the same physical time. The study runs
+the same flow at increasing resolution $N$ and measures, at each $N$, the
+relative $L_2$ difference between the two fields over all $N^2$ lattice nodes:
 
 ```math
-\varepsilon_2(N)=\frac{\lVert \mathbf{u}_h-\mathbf{u}_{\text{exact}}\rVert_2}{\lVert \mathbf{u}_{\text{exact}}\rVert_2},\qquad
-p=\frac{\ln\!\big[\varepsilon_2(N_1)/\varepsilon_2(N_2)\big]}{\ln(N_2/N_1)},
+\varepsilon_2(N)=\frac{\lVert \mathbf{u}_h-\mathbf{u}_{\text{exact}}\rVert_2}{\lVert \mathbf{u}_{\text{exact}}\rVert_2}
+=\sqrt{\frac{\sum_{\mathbf{x}}\lVert \mathbf{u}_h(\mathbf{x})-\mathbf{u}_{\text{exact}}(\mathbf{x})\rVert^2}{\sum_{\mathbf{x}}\lVert \mathbf{u}_{\text{exact}}(\mathbf{x})\rVert^2}} .
 ```
 
-are (`--order`, $\tau=0.8$):
+To make the comparison a clean grid-refinement study, **diffusive scaling** is
+used: the relaxation time $\tau$ (hence the lattice viscosity) is held fixed,
+the Mach number is shrunk as $\mathrm{Ma}\sim 1/N$, and each run is integrated
+to the *same* physical time (so the step count grows as $N^2$). Both the
+spatial truncation error and the $\mathcal{O}(\mathrm{Ma}^2)$ compressibility
+error are then $\mathcal{O}(\Delta x^2)$, and the observed order between two
+successive resolutions is
 
-| $N$ | $u_{\text{lat}}$ | steps | $\varepsilon_2$ | order $p$ |
+```math
+p=\frac{\ln\!\big[\varepsilon_2(N_1)/\varepsilon_2(N_2)\big]}{\ln(N_2/N_1)} .
+```
+
+Results (`--order`, $\tau=0.8$; each row is one full simulation compared to the
+analytic solution):
+
+| $N$ | $u_{\text{lat}}$ | steps | $\varepsilon_2$ (solver vs exact) | order $p$ |
 |----:|------:|------:|:-----------:|:---------:|
 | 32  | 0.0400 | 130  | $4.85\times10^{-3}$ | — |
 | 64  | 0.0200 | 520  | $1.22\times10^{-3}$ | 1.99 |
 | 128 | 0.0100 | 2080 | $3.00\times10^{-4}$ | 2.03 |
 | 256 | 0.0050 | 8320 | $7.67\times10^{-5}$ | 1.96 |
 
-The observed order $p\approx 1.96$ confirms the expected second-order
-convergence of the BGK scheme with halfway bounce-back.
+Each halving of the grid spacing (doubling of $N$) cuts the error by
+$\approx4\times$, i.e. the observed order is $p\approx 2$ — the second-order
+convergence expected of the BGK scheme with halfway bounce-back. (The last
+column is the order between consecutive rows; the dash marks the coarsest grid,
+which has no predecessor to compare against.)
 
 ### 3.3 Benchmark flows
 
