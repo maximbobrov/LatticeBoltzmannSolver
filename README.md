@@ -10,6 +10,7 @@ discrete operator, an observed-order-of-accuracy study, established benchmark
 comparisons, and a bit-exact CPU/GPU cross-check.
 
 Kármán vortex street ( Re = 100; Grid: 768x256):
+
 CPU:
 <img width="1206" height="438" alt="20260727-1358-05 8769947" src="https://github.com/user-attachments/assets/534c693e-fb27-4f4a-a6a8-155b96887a4b" />
 
