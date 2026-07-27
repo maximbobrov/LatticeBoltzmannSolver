@@ -301,54 +301,141 @@ profile on the reference with the relative $L_2$ error and a verdict.
 
 <img width="1919" height="1031" alt="image" src="https://github.com/user-attachments/assets/75c98d54-fe35-414c-89f4-3bda9b5435ed" />
 
-**Taylor–Green.** The effective viscosity recovered from the energy decay,
+The problem statement of each case follows. Throughout, $N$ is the base
+resolution (key `8`/`9`), $U=u_{\text{lat}}$ the velocity scale, and the
+viscosity is set from the target Reynolds number as $\nu=U L_{\text{ch}}/\mathrm{Re}$
+with $L_{\text{ch}}$ the characteristic length named below.
 
-```math
-\nu_{\text{eff}}=-\frac{\ln\!\big(E/E_0\big)}{2(k_x^2+k_y^2)\,t},
-```
+#### 1. Taylor–Green vortex
 
-matches the imposed $\nu$ to 0.07 %, isolating the collision operator from any
-wall treatment.
+- **Geometry / BC.** Square domain $N\times N$, **fully periodic** on both axes
+  — no walls. $L_{\text{ch}}=N$.
+- **Setup.** The lattice is initialised with the exact Taylor–Green field
+  (§3.2) at $t=0$ and left to decay freely.
+- **Computed.** The kinetic energy $E(t)=\tfrac12\sum \mathbf{u}^2$ is monitored
+  and the effective viscosity is recovered from its decay rate,
 
-**Channel flows.** With the wall planes at $y=\tfrac12$ and $y=N-\tfrac32$, the
-profiles are compared in the normalised coordinate $s=(y-\tfrac12)/(N-2)$, and
-the macroscopic fields of wall cells are ghost-filled,
+  ```math
+  \nu_{\text{eff}}=-\frac{\ln\!\big(E(t)/E_0\big)}{2(k_x^2+k_y^2)\,t}.
+  ```
+
+- **Compared to.** The analytically imposed $\nu$. Because there are no walls,
+  this isolates the collision operator alone.
+- **Result.** $\nu_{\text{eff}}$ matches $\nu$ to **0.07 %** ($64^2$, 3000
+  steps).
+
+#### 2. Poiseuille channel
+
+- **Geometry / BC.** Strip $N\times N$, **periodic in $x$**; the top and bottom
+  rows are static no-slip walls (`CT_SOLID`, halfway bounce-back). The channel
+  height between wall planes is $H=N-2=L_{\text{ch}}$.
+- **Setup.** A uniform body force $g_x=8\nu U/H^2$ (Guo forcing, §1.3) drives
+  the flow, which is integrated to steady state.
+- **Computed.** The streamwise velocity profile $u(y)$ across the channel at
+  mid-length, in the normalised coordinate $s=(y-\tfrac12)/H\in[0,1]$.
+- **Compared to.** The exact parabola $u(s)=4Us(1-s)$; error is the relative
+  $L_2$ norm along the profile.
+- **Result.** $L_2=$ **0.10 %** ($H=32$).
+
+#### 3. Couette channel
+
+- **Geometry / BC.** Strip $N\times N$, **periodic in $x$**; bottom row a static
+  wall, top row a wall **moving** at $U$ (`CT_MOVING`, bounce-back with the
+  wall-momentum term of §1.4). $H=N-2=L_{\text{ch}}$.
+- **Setup.** The moving lid drags the fluid; integrated to steady state.
+- **Computed.** The profile $u(s)$ across the channel.
+- **Compared to.** The exact linear profile $u(s)=Us$ (relative $L_2$).
+- **Result.** $L_2=$ **0.03 %** ($H=32$) — the cleanest case, since a linear
+  profile is reproduced almost exactly.
+
+For the channel and cavity cases the wall planes lie at $y=\tfrac12$ and
+$y=N-\tfrac32$, and the macroscopic fields of wall cells are ghost-filled,
 $\mathbf{u}_{\text{ghost}}=2\mathbf{u}_{\text{wall}}-\mathbf{u}_{\text{fluid}}$,
 so that bilinear sampling reads exactly $\mathbf{u}_{\text{wall}}$ on the wall
 plane.
 
-**Cavity.** Centre-line profiles $u(y)$ at $x^*=0.5$ and $v(x)$ at $y^*=0.5$
-are compared against the tabulated data of Ghia, Ghia & Shin (1982) at
-$\mathrm{Re}=100$ and $1000$ — the de-facto standard benchmark for
-incompressible cavity flow.
+#### 4. Lid-driven cavity
 
-**Cylinder.** At $\mathrm{Re}=100$ the wake sheds a periodic Kármán street; the
-measured Strouhal number $\mathrm{St}=0.1637$ lies within the accepted band for
-a circular cylinder ($\mathrm{St}\approx0.164$–$0.166$, Williamson 1996; the
-small confinement, blockage $D/H=1/8$, shifts it slightly), and the mean drag
-$C_d=1.33$ is consistent with the laminar-shedding literature.
+- **Geometry / BC.** Square cavity $N\times N$ enclosed on all four sides; the
+  left, right and bottom are static walls, the **top lid moves** at $U$. Side
+  $L=N-2=L_{\text{ch}}$.
+- **Setup.** The classic nonlinear steady recirculation; run to steady state at
+  $\mathrm{Re}=100$ and $1000$ ($128^2$).
+- **Computed.** The two centre-line profiles: $u(y)$ along the vertical centre
+  line $x^*=0.5$, and $v(x)$ along the horizontal centre line $y^*=0.5$.
+- **Compared to.** The tabulated benchmark of **Ghia, Ghia & Shin (1982)** —
+  the de-facto standard for incompressible cavity flow — at the matching
+  Reynolds number.
+- **Result.** $\mathrm{Re}=100$: $L_2=$ **0.5 % / 2.4 %** ($u$/$v$);
+  $\mathrm{Re}=1000$: **1.5 % / 2.1 %**.
 
-**Backward-facing step.** The lower-wall recirculation reattaches at
-$x_r/S=4.18$ at $\mathrm{Re}=200$, in the range reported by Armaly et al.
-(1983) for the two-dimensional laminar regime.
+#### 5. Cylinder in a channel (Kármán vortex street)
 
-**Porous medium.** Darcy's law relates the superficial (whole-volume-averaged)
-velocity to the driving force through a geometry-only permeability $K$,
+- **Geometry / BC.** Channel $3N\times N$ (e.g. $384\times128$) with static
+  top/bottom walls, a **uniform equilibrium inlet** ($u=U$) on the left, a
+  first-order **outflow** on the right, and a circular cylinder of diameter
+  $D=N/8=L_{\text{ch}}$ (blockage $D/H\approx1/8$) placed $\sim6.4\,D$
+  downstream of the inlet. Its centre is offset laterally by $0.31$ cells to
+  break the symmetry and trigger shedding.
+- **Setup.** Uniform inflow at $\mathrm{Re}=UD/\nu=100$; the wake develops an
+  unsteady periodic vortex street. The force on the cylinder is obtained by
+  **momentum exchange** (§1.5) every step, giving the time series $C_d(t)$,
+  $C_l(t)$.
+- **Computed.** The Strouhal number $\mathrm{St}=D/(UT)$ from the mean period
+  $T$ between upward zero-crossings of $C_l(t)$; the mean drag $C_d$ and the
+  lift amplitude.
+- **Compared to.** The accepted circular-cylinder value
+  $\mathrm{St}\approx0.164$–$0.166$ at $\mathrm{Re}=100$ (Williamson 1996); the
+  small confinement shifts it slightly.
+- **Result.** **$\mathrm{St}=0.1637$**, $C_d=1.33$, $C_l$ amplitude $0.28$.
 
-```math
-\langle u\rangle_{\text{sup}}=\frac{K}{\nu}\,g_x
-\qquad\Longrightarrow\qquad
-K=\frac{\nu\,\langle u\rangle_{\text{sup}}}{g_x},
-\qquad
-\langle u\rangle_{\text{sup}}=\frac{1}{N_xN_y}\!\!\sum_{\text{fluid}}\!u_x .
-```
+#### 6. Backward-facing step
 
-Measuring $K$ at two viscosities isolates a *known* limitation of the plain
-BGK/bounce-back combination: the effective wall position depends weakly on
-$\tau$, so $K$ drifts by 6.8 % between $\tau=0.74$ and $0.62$ (Pan, Luo &
-Miller 2006). The gate reports this drift and thereby doubles as a ready-made
-target for a two-relaxation-time (TRT) upgrade, which pins the wall for all
-$\tau$ via the magic parameter $\Lambda=\tfrac{3}{16}$.
+- **Geometry / BC.** Channel $4N\times N$ (e.g. $512\times128$) with a **sudden
+  1:2 expansion at the inlet plane**: the lower half of the left boundary is a
+  solid step face of height $S=(N-2)/2$, while the upper half carries a
+  **parabolic (fully developed) inlet** of mean velocity $U$; top and bottom
+  are static walls and the right boundary is an outflow. The Reynolds number is
+  built on the inlet hydraulic diameter, $L_{\text{ch}}=N-2$.
+- **Setup.** $\mathrm{Re}=200$; run to steady state. The flow separates at the
+  step and forms a recirculation bubble along the lower wall.
+- **Computed.** The reattachment length $x_r$ — the distance from the step to
+  the point where the near-floor streamwise velocity changes sign — expressed
+  in step heights $x_r/S$.
+- **Compared to.** The experimental/computational data of **Armaly et al.
+  (1983)** for the 2-D laminar regime.
+- **Result.** **$x_r/S=4.18$** at $\mathrm{Re}=200$, within the reported range.
+
+#### 7. Porous medium (Darcy flow)
+
+- **Geometry / BC.** Square domain $N\times N$, **fully periodic**, filled with
+  randomly placed overlapping circular grains (diameter $N/8$, fixed random
+  seed for reproducibility) until the solid fraction reaches $\approx28\%$;
+  the resulting porosity is $\varepsilon\approx0.71$. $L_{\text{ch}}=D$ (grain
+  diameter).
+- **Setup.** A uniform body force $g_x$ drives creeping flow through the pore
+  network to steady state — the signature LBM application, since the geometry
+  enters only through the solid/fluid mask.
+- **Computed.** Darcy's law relates the superficial (whole-volume-averaged)
+  velocity to the force through a geometry-only permeability $K$:
+
+  ```math
+  \langle u\rangle_{\text{sup}}=\frac{K}{\nu}\,g_x
+  \ \Longrightarrow\
+  K=\frac{\nu\,\langle u\rangle_{\text{sup}}}{g_x},
+  \qquad
+  \langle u\rangle_{\text{sup}}=\frac{1}{N_xN_y}\!\!\sum_{\text{fluid}}\!u_x .
+  ```
+
+- **Compared to.** $K$ must be a property of the geometry **alone**, so the gate
+  measures it at two viscosities and requires agreement. This exposes a *known*
+  limitation of plain BGK/bounce-back: the effective wall position depends
+  weakly on $\tau$, so $K$ drifts by **6.8 %** between $\tau=0.74$ and $0.62$
+  (Pan, Luo & Miller 2006).
+- **Result.** $K\approx8$ cells² at $\varepsilon=0.71$; the reported drift
+  doubles as a ready-made acceptance target for a two-relaxation-time (TRT)
+  upgrade, which pins the wall for all $\tau$ via the magic parameter
+  $\Lambda=\tfrac{3}{16}$.
 
 ---
 
