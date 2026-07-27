@@ -42,7 +42,7 @@ recovers the weakly compressible Navier–Stokes equations with kinematic
 viscosity
 
 ```math
-\nu = c_s^{2}\Big(\tau-\tfrac12\Big),\qquad c_s^{2}=\tfrac13,\qquad \Longrightarrow\qquad \tau = 3\nu + \tfrac12 ,
+\nu = c_s^{2}\Big(\tau-\tfrac{1}{2}\Big),\qquad c_s^{2}=\tfrac{1}{3},\qquad \Longrightarrow\qquad \tau = 3\nu + \tfrac{1}{2} ,
 ```
 
 $c_s$ being the lattice speed of sound. All quantities are expressed in lattice
@@ -79,14 +79,14 @@ The second-order (truncated Maxwellian) equilibrium is
 f_i^{\mathrm{eq}} = w_i\,\rho\left[\,1 + 3(\mathbf{e}_i\!\cdot\!\mathbf{u}) + \tfrac{9}{2}(\mathbf{e}_i\!\cdot\!\mathbf{u})^2 - \tfrac{3}{2}\,\mathbf{u}^2\,\right],
 ```
 
-in which the coefficients are $c_s^{-2}=3$, $\tfrac12 c_s^{-4}=\tfrac92$ and
-$\tfrac12 c_s^{-2}=\tfrac32$. The hydrodynamic moments are
+in which the coefficients are $c_s^{-2}=3$, $\tfrac{1}{2} c_s^{-4}=\tfrac{9}{2}$ and
+$\tfrac{1}{2} c_s^{-2}=\tfrac{3}{2}$. The hydrodynamic moments are
 
 ```math
-\rho=\sum_i f_i,\qquad \rho\,\mathbf{u}=\sum_i f_i\,\mathbf{e}_i + \tfrac12\mathbf{F},
+\rho=\sum_i f_i,\qquad \rho\,\mathbf{u}=\sum_i f_i\,\mathbf{e}_i + \tfrac{1}{2}\mathbf{F},
 ```
 
-the $\tfrac12\mathbf{F}$ term being the forcing correction of §1.3. By
+the $\tfrac{1}{2}\mathbf{F}$ term being the forcing correction of §1.3. By
 construction the equilibrium reproduces the mass, momentum and Euler stress
 moments exactly,
 
@@ -106,7 +106,7 @@ free of spurious $\tau$-dependent terms. The velocity carries a half-force
 shift, and a forcing population is added after collision:
 
 ```math
-\mathbf{u} = \frac{1}{\rho}\left(\sum_i f_i\,\mathbf{e}_i + \tfrac12\mathbf{F}\right),
+\mathbf{u} = \frac{1}{\rho}\left(\sum_i f_i\,\mathbf{e}_i + \tfrac{1}{2}\mathbf{F}\right),
 ```
 
 ```math
@@ -151,8 +151,8 @@ $2 f_i^{\star}\mathbf{e}_i$ per step. The drag and lift coefficients and the
 Strouhal number follow the standard definitions
 
 ```math
-C_d=\frac{F_x}{\tfrac12\rho_0 U^{2} D},\qquad
-C_l=\frac{F_y}{\tfrac12\rho_0 U^{2} D},\qquad
+C_d=\frac{F_x}{\tfrac{1}{2}\rho_0 U^{2} D},\qquad
+C_l=\frac{F_y}{\tfrac{1}{2}\rho_0 U^{2} D},\qquad
 \mathrm{St}=\frac{D}{U\,T},
 ```
 
@@ -193,24 +193,35 @@ cuda_kernels.*   CUDA core: thin per-cell kernel wrappers around lattice.h
 ```
 
 The routine `lbmCellUpdate()` in [`lattice.h`](lattice.h) *is* the entire
-numerical method. It is compiled twice: on the CPU an OpenMP `parallel for`
-calls it per cell; on the GPU a CUDA kernel launches one thread per cell and
-calls **the same function** (the macro `LBM_HD` expands to
-`__host__ __device__ __forceinline__` under `nvcc`, and to `inline`
-otherwise). Two consequences follow. First, there is a single implementation
-of the physics to reason about and maintain. Second, the two back-ends are
-required to agree bitwise: after 200 cavity steps the measured discrepancy is
-$\max_i|f_i^{\text{GPU}}-f_i^{\text{CPU}}| = 8.3\times10^{-16}$, i.e. pure
-fused-multiply-add round-off (§3, `--gpucheck`).
+numerical method — the fused stream-and-collide update of one cell (§1.6). It is
+written once and compiled for **two independent back-ends**:
 
-In GPU mode the two distribution buffers and the flag field are uploaded once;
-`gpuLbmSteps(n)` then runs $n$ fused kernels back-to-back on the device, and
-only the three macroscopic fields are copied back per rendered frame. On a
-$128^2$ cavity the throughput is **88 MLUPS** on the CPU (OpenMP) versus
-**599 MLUPS** on the GPU (RTX 5070 Laptop); the gap widens on larger grids,
-the small case being launch-bound. The CPU path is fully functional without any
-CUDA toolkit — the build detects `nvcc` and falls back to stubs — and serves
-as the reference implementation for the GPU cross-check.
+- **CPU back-end (OpenMP).** In [`lbm_core.cpp`](lbm_core.cpp) an OpenMP
+  `#pragma omp parallel for` sweeps the lattice and calls `lbmCellUpdate()` once
+  per cell, so the work is spread across all CPU cores (multi-threaded, not
+  vectorised by hand). This path needs no CUDA toolkit at all — the build
+  detects `nvcc` and, when it is absent, links stub GPU functions so the program
+  still compiles and runs CPU-only.
+- **GPU back-end (CUDA).** In [`cuda_kernels.cu`](cuda_kernels.cu) a CUDA kernel
+  launches **one thread per cell**, each thread calling **the same**
+  `lbmCellUpdate()`. The two distribution buffers and the flag field are uploaded
+  once; `gpuLbmSteps(n)` then runs $n$ fused kernels back-to-back on the device,
+  and only the three macroscopic fields are copied back per rendered frame.
+
+The macro `LBM_HD` expands to `__host__ __device__ __forceinline__` under `nvcc`
+and to plain `inline` otherwise, which is what lets a single source function
+serve both compilers. OpenMP is therefore *not* an alternative to CUDA — it is
+simply how the **CPU** version is parallelised across cores; CUDA is how the
+**GPU** version is parallelised across threads. Both execute identical
+arithmetic.
+
+Two consequences follow. First, there is a single implementation of the physics
+to reason about and maintain. Second, the back-ends must agree bitwise: after
+200 cavity steps the measured discrepancy is
+$\max_i|f_i^{\text{GPU}}-f_i^{\text{CPU}}| = 8.3\times10^{-16}$, i.e. pure
+fused-multiply-add round-off (§3.1, `--gpucheck`). The CPU path thus doubles as
+the reference implementation against which the GPU is verified. Throughput is
+quantified in §3.4.
 
 ---
 
@@ -312,13 +323,9 @@ with $L_{\text{ch}}$ the characteristic length named below.
   — no walls. $L_{\text{ch}}=N$.
 - **Setup.** The lattice is initialised with the exact Taylor–Green field
   (§3.2) at $t=0$ and left to decay freely.
-- **Computed.** The kinetic energy $E(t)=\tfrac12\sum \mathbf{u}^2$ is monitored
-  and the effective viscosity is recovered from its decay rate,
-
-  ```math
-  \nu_{\text{eff}}=-\frac{\ln\!\big(E(t)/E_0\big)}{2(k_x^2+k_y^2)\,t}.
-  ```
-
+- **Computed.** The kinetic energy $E(t)=\tfrac{1}{2}\sum \mathbf{u}^2$ is
+  monitored and the effective viscosity is recovered from its decay rate,
+  $\nu_{\text{eff}}=-\ln\!\big(E(t)/E_0\big)/[\,2(k_x^2+k_y^2)\,t\,]$.
 - **Compared to.** The analytically imposed $\nu$. Because there are no walls,
   this isolates the collision operator alone.
 - **Result.** $\nu_{\text{eff}}$ matches $\nu$ to **0.07 %** ($64^2$, 3000
@@ -332,7 +339,7 @@ with $L_{\text{ch}}$ the characteristic length named below.
 - **Setup.** A uniform body force $g_x=8\nu U/H^2$ (Guo forcing, §1.3) drives
   the flow, which is integrated to steady state.
 - **Computed.** The streamwise velocity profile $u(y)$ across the channel at
-  mid-length, in the normalised coordinate $s=(y-\tfrac12)/H\in[0,1]$.
+  mid-length, in the normalised coordinate $s=(y-\tfrac{1}{2})/H\in[0,1]$.
 - **Compared to.** The exact parabola $u(s)=4Us(1-s)$; error is the relative
   $L_2$ norm along the profile.
 - **Result.** $L_2=$ **0.10 %** ($H=32$).
@@ -348,9 +355,9 @@ with $L_{\text{ch}}$ the characteristic length named below.
 - **Result.** $L_2=$ **0.03 %** ($H=32$) — the cleanest case, since a linear
   profile is reproduced almost exactly.
 
-For the channel and cavity cases the wall planes lie at $y=\tfrac12$ and
-$y=N-\tfrac32$, and the macroscopic fields of wall cells are ghost-filled,
-$\mathbf{u}_{\text{ghost}}=2\mathbf{u}_{\text{wall}}-\mathbf{u}_{\text{fluid}}$,
+For the channel and cavity cases the wall planes lie at $y=1/2$ and $y=N-3/2$,
+and the macroscopic fields of wall cells are ghost-filled,
+$\mathbf{u}_{\text{ghost}}=2\,\mathbf{u}_{\text{wall}}-\mathbf{u}_{\text{fluid}}$,
 so that bilinear sampling reads exactly $\mathbf{u}_{\text{wall}}$ on the wall
 plane.
 
@@ -362,12 +369,12 @@ plane.
 - **Setup.** The classic nonlinear steady recirculation; run to steady state at
   $\mathrm{Re}=100$ and $1000$ ($128^2$).
 - **Computed.** The two centre-line profiles: $u(y)$ along the vertical centre
-  line $x^*=0.5$, and $v(x)$ along the horizontal centre line $y^*=0.5$.
+  line $x=L/2$, and $v(x)$ along the horizontal centre line $y=L/2$.
 - **Compared to.** The tabulated benchmark of **Ghia, Ghia & Shin (1982)** —
   the de-facto standard for incompressible cavity flow — at the matching
   Reynolds number.
-- **Result.** $\mathrm{Re}=100$: $L_2=$ **0.5 % / 2.4 %** ($u$/$v$);
-  $\mathrm{Re}=1000$: **1.5 % / 2.1 %**.
+- **Result.** $\mathrm{Re}=100$: $L_2=$ **0.5 %** and **2.4 %** (for $u$ and
+  $v$); $\mathrm{Re}=1000$: **1.5 %** and **2.1 %**.
 
 #### 5. Cylinder in a channel (Kármán vortex street)
 
@@ -417,16 +424,11 @@ plane.
   network to steady state — the signature LBM application, since the geometry
   enters only through the solid/fluid mask.
 - **Computed.** Darcy's law relates the superficial (whole-volume-averaged)
-  velocity to the force through a geometry-only permeability $K$:
-
-  ```math
-  \langle u\rangle_{\text{sup}}=\frac{K}{\nu}\,g_x
-  \ \Longrightarrow\
-  K=\frac{\nu\,\langle u\rangle_{\text{sup}}}{g_x},
-  \qquad
-  \langle u\rangle_{\text{sup}}=\frac{1}{N_xN_y}\!\!\sum_{\text{fluid}}\!u_x .
-  ```
-
+  velocity to the force through a geometry-only permeability $K$, namely
+  $\langle u\rangle_{\text{sup}}=K\,g_x/\nu$, hence
+  $K=\nu\,\langle u\rangle_{\text{sup}}/g_x$, with the superficial velocity
+  $\langle u\rangle_{\text{sup}}=\frac{1}{N_xN_y}\sum_{\text{fluid}}u_x$
+  averaged over the whole box.
 - **Compared to.** $K$ must be a property of the geometry **alone**, so the gate
   measures it at two viscosities and requires agreement. This exposes a *known*
   limitation of plain BGK/bounce-back: the effective wall position depends
@@ -436,6 +438,29 @@ plane.
   doubles as a ready-made acceptance target for a two-relaxation-time (TRT)
   upgrade, which pins the wall for all $\tau$ via the magic parameter
   $\Lambda=\tfrac{3}{16}$.
+
+### 3.4 Throughput: CPU vs GPU
+
+Performance is reported for the Taylor–Green vortex (fully periodic, so the
+figure is the pure per-cell kernel cost with no wall or boundary handling), in
+double precision, for 4000 time steps. The metric is **MLUPS** — millions of
+lattice-cell updates per second, $\mathrm{MLUPS}=N_xN_y\cdot\text{steps}/(t\cdot10^6)$.
+Hardware: Intel laptop CPU (OpenMP over all cores) and an NVIDIA RTX 5070 Laptop
+GPU (one CUDA thread per cell). Run it with `--bench [steps] [N]`.
+
+| Grid | CPU time | CPU MLUPS | GPU time | GPU MLUPS | GPU speed-up |
+|-----:|---------:|----------:|---------:|----------:|:------------:|
+| $64^2$   | 0.17 s | 98  | 0.06 s | 275 | 2.8× |
+| $128^2$  | 0.53 s | 125 | 0.10 s | 642 | 5.1× |
+| $256^2$  | 1.94 s | 136 | 0.38 s | 697 | 5.1× |
+| $512^2$  | 8.89 s | 118 | 1.40 s | 748 | 6.3× |
+
+The GPU saturates at roughly 700 MLUPS from $128^2$ upward, while the small
+$64^2$ grid under-fills the device and is launch-bound; the CPU back-end holds
+about 120–135 MLUPS across all sizes. The absolute values are modest because the
+scheme runs in double precision — a single-precision or structure-of-arrays
+optimisation pass would raise both back-ends substantially — but the CPU/GPU
+ratio and the identical results (`--gpucheck`) are the point here.
 
 ---
 
@@ -460,7 +485,7 @@ the application builds CPU-only). Paths are taken from the `QTDIR`,
 ./LBM.exe --cylinder 100    # Kármán street; measures St, C_d, C_l
 ./LBM.exe --step 200        # backward-facing step; reattachment x_r/S
 ./LBM.exe --porous          # Darcy gate: K at two viscosities
-./LBM.exe --bench 2000      # throughput (MLUPS), CPU and GPU
+./LBM.exe --bench 4000 256  # throughput (MLUPS) on Taylor-Green, steps and N
 ./LBM.exe --xtest --auto    # headless / hands-off GUI soak tests
 ```
 
@@ -507,8 +532,8 @@ the axis labels are.
   identical headless path ran cleanly. It is created eagerly in `main()` via
   `gpuWarmup()` (`cudaFree(0)`) before `glutInit()`. This applies to any
   CUDA + OpenGL application on such systems.
-- **$\tau\to\tfrac12$ instability.** The single-relaxation-time BGK operator
-  loses stability as $\tau\to\tfrac12$ (high Reynolds number on a coarse
+- **$\tau\to\tfrac{1}{2}$ instability.** The single-relaxation-time BGK operator
+  loses stability as $\tau\to\tfrac{1}{2}$ (high Reynolds number on a coarse
   grid); the application warns when $\tau<0.51$. Remedies are grid refinement,
   a lower Reynolds number, or a TRT/MRT collision operator (§6).
 - **Compressibility.** Errors scale as $\mathcal{O}(\mathrm{Ma}^2)$; keeping
@@ -534,7 +559,7 @@ references below, with conventions matching the Krüger et al. textbook.
 
 1. Y. H. Qian, D. d'Humières, P. Lallemand, *Lattice BGK models for the
    Navier–Stokes equation*, **Europhys. Lett. 17** (1992) 479. — D2Q9 BGK
-   model, weights, equilibrium, $\nu=c_s^2(\tau-\tfrac12)$.
+   model, weights, equilibrium, $\nu=c_s^2(\tau-\tfrac{1}{2})$.
 2. T. Krüger, H. Kusumaatmaja, A. Kuzmin, O. Shardt, G. Silva, E. M. Viggen,
    *The Lattice Boltzmann Method: Principles and Practice*, **Springer**
    (2017). — Chapman–Enskog analysis, verification methodology; companion

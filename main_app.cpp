@@ -2,6 +2,7 @@
 #include "cuda_kernels.h"
 #include <chrono>
 #include <cstring>
+#include <cctype>
 
 // LBM entry point + UI state. Architecture mirrors VortexGridFreeSolver's
 // main_app.cpp: GLUT loop, keyboard-driven scenario/core switching, CLI gates.
@@ -277,8 +278,11 @@ int main(int argc, char** argv)
             return runXTest() ? 1 : 0;
         if (!strcmp(argv[a], "--bench"))
         {
-            const int n = (a + 1 < argc) ? atoi(argv[a + 1]) : 1000;
-            P.scenario = SCN_CAVITY;
+            // --bench [steps] [N]: throughput on Taylor-Green (fully periodic,
+            // pure kernel cost) at grid size N.
+            const int n = (a + 1 < argc && isdigit((unsigned char)argv[a+1][0])) ? atoi(argv[a + 1]) : 2000;
+            const int Nb = (a + 2 < argc && isdigit((unsigned char)argv[a+2][0])) ? atoi(argv[a + 2]) : 256;
+            P.scenario = SCN_TAYLOR_GREEN; P.N = Nb;
             P.Re = scenarioDefaultRe(P.scenario);
             applyScenario(); lbmAllocate(); buildFlags(); lbmInitFields();
             runBench(n);
