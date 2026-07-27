@@ -16,6 +16,7 @@ int    stepsPerFrame = 50;
 double colorGain     = 1.0;
 double velArrowScale = 1.0;
 double lastMLUPS     = 0.0;
+double viewZoom      = 1.0;
 
 void rebuildAll()
 {
@@ -171,6 +172,8 @@ void keyboard(unsigned char key, int, int)
                P.dxPhys*1e3, P.NX*P.dxPhys*1e3, P.NY*P.dxPhys*1e3);
         break;
     }
+    case 'q': case 'Q': viewZoom = fmin(20.0, viewZoom * 1.25); break;   // zoom in
+    case 'e': case 'E': viewZoom = fmax(0.25, viewZoom * 0.8);  break;   // zoom out
     case ',': velArrowScale *= 0.8;  break;
     case '.': velArrowScale *= 1.25; break;
     case '[': colorGain *= 0.8;  break;
@@ -203,6 +206,9 @@ static const AutoEv autoSeq[] = {
     { 2000, ' ' },   // run on GPU
     { 1000, 'g' },   // lattice grid overlay
     { 1000, 'p' },   // tracer particles
+    { 800,  'q' },   // zoom in
+    { 800,  'q' },
+    { 1200, 'e' },   // zoom out
     { 4000, 'o' },   // -> Poiseuille (o pauses)
     { 1000, ' ' },
     { 4000, 'o' },   // -> Couette

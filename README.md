@@ -371,6 +371,7 @@ the application builds CPU-only). Paths are taken from the `QTDIR`,
 | `X` | toggle CPU ↔ GPU core (state carried over, works mid-run) |
 | `1 2 3` | field: vorticity / $\lvert\mathbf{u}\rvert$ / $\rho$ |
 | `8 9` | grid $N$ ÷2 / ×2 |
+| `Q` `E` | zoom the view in / out (about the domain centre) |
 | `-` `=` | Reynolds number ÷2 / ×2 ($\tau$ recomputed on the fly) |
 | `S` | steps per frame 1/10/50/200/1000 |
 | `V`, `,` `.` | velocity arrows on/off, arrow length |

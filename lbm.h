@@ -168,5 +168,6 @@ extern int    stepsPerFrame;
 extern double colorGain;
 extern double velArrowScale;
 extern double lastMLUPS;
+extern double viewZoom;         // Q/E: zoom the viewed region about its centre
 
 #endif // LBM_H

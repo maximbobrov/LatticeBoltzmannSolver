@@ -414,6 +414,12 @@ void display()
             const double cy = 0.5*(y0 + y1), half = 0.5 * wx / aspect;
             y0 = cy - half; y1 = cy + half;
         }
+        // zoom about the domain centre (Q/E)
+        {
+            const double cx = 0.5*(x0 + x1), cy = 0.5*(y0 + y1);
+            const double hx = 0.5*(x1 - x0)/viewZoom, hy = 0.5*(y1 - y0)/viewZoom;
+            x0 = cx - hx; x1 = cx + hx; y0 = cy - hy; y1 = cy + hy;
+        }
         glMatrixMode(GL_PROJECTION);
         glLoadIdentity();
         gluOrtho2D(x0, x1, y0, y1);
@@ -539,10 +545,19 @@ void display()
     glLoadIdentity();
 
     char line[256];
+    // translucent backing so the HUD text stays legible over a bright field
+    {
+        float bx1 = (float)winW - 286.0f; if (bx1 < 420.0f) bx1 = 420.0f;
+        glColor4f(0.0f, 0.0f, 0.0f, 0.5f);
+        glBegin(GL_QUADS);
+        glVertex2f(0.0f, (float)winH); glVertex2f(bx1, (float)winH);
+        glVertex2f(bx1, (float)winH - 102.0f); glVertex2f(0.0f, (float)winH - 102.0f);
+        glEnd();
+    }
     glColor3f(0.8f, 0.9f, 1.0f);
-    sprintf(line, "field: %s   gain %.2f   grid %dx%d   steps/frame %d   core: %s   %.0f MLUPS",
+    sprintf(line, "field: %s   gain %.2f   grid %dx%d   steps/frame %d   core: %s   %.0f MLUPS   zoom %.2gx (Q/E)",
             fieldNames[fieldMode], colorGain, NX, NY, stepsPerFrame,
-            useGpu ? gpuDeviceName() : "CPU", lastMLUPS);
+            useGpu ? gpuDeviceName() : "CPU", lastMLUPS, viewZoom);
     drawText(10, winH - 20, GLUT_BITMAP_HELVETICA_12, line);
     {
         char sx[32], sy[32], sd[32];
@@ -650,6 +665,7 @@ void display()
             {"O",     "next case (TG/Pois/Cou/cav/cyl/step/porous)", 1,1,1},
             {"1 2 3", "field: vorticity / |u| / rho",           1,1,1},
             {"8 9",   "grid N /2  x2",                          1,1,1},
+            {"Q E",   "zoom in / out (view)",                   1,1,1},
             {"- =",   "Re /2  x2",                              1,1,1},
             {"S",     "steps per frame 1/10/50/200/1000",       1,1,1},
             {"V",     "velocity arrows",                        1,1,1},
@@ -696,7 +712,7 @@ void display()
     double topY = legendBottomY - 20;
     if (P.scenario == SCN_CYLINDER && forceHistCount() > 10)
     {
-        const double plotW = 265, plotH = 60;
+        const double plotW = 340, plotH = 95;
         const double plotL = winW - plotW - 12;
         const double plotB = topY - plotH;
         glColor4f(0.12f, 0.12f, 0.12f, 0.9f);
@@ -729,7 +745,7 @@ void display()
         Validation val;
         if (computeValidation(val))
         {
-            const double vpW = 265, vpL = winW - vpW - 12, vpH = 74;
+            const double vpW = 340, vpL = winW - vpW - 12, vpH = 100;
             if (val.reMismatch)
             {
                 glColor3f(1.0f, 0.5f, 0.3f);
