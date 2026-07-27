@@ -11,12 +11,11 @@ comparisons, and a bit-exact CPU/GPU cross-check.
 
 Kármán vortex street ( Re = 100; Grid: 768x256):
 CPU:
-<img width="1192" height="426" alt="20260727-1350-35 9667209" src="https://github.com/user-attachments/assets/a3f7e4b9-9381-493f-b6e0-f2a529cbbafd" />
+<img width="1192" height="426" alt="20260727-1354-59 2457759" src="https://github.com/user-attachments/assets/39122f1a-c028-41e2-871d-cd2b19a60986" />
+
 
 GPU:
-<img width="1192" height="430" alt="20260727-1351-29 1142332" src="https://github.com/user-attachments/assets/630db12f-2749-4355-b03a-d1763a827dd7" />
-
-
+<img width="1194" height="432" alt="20260727-1355-42 4774870" src="https://github.com/user-attachments/assets/afeebe10-0bf1-4ba3-ac59-4bf29f10110d" />
 
 ---
 
