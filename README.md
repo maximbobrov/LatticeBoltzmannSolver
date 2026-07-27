@@ -324,8 +324,7 @@ with $L_{\text{ch}}$ the characteristic length named below.
 - **Setup.** The lattice is initialised with the exact Taylor–Green field
   (§3.2) at $t=0$ and left to decay freely.
 - **Computed.** The kinetic energy $E(t)=\tfrac{1}{2}\sum \mathbf{u}^2$ is
-  monitored and the effective viscosity is recovered from its decay rate,
-  $\nu_{\text{eff}}=-\ln\!\big(E(t)/E_0\big)/[\,2(k_x^2+k_y^2)\,t\,]$.
+  monitored, and the effective viscosity is recovered from its decay rate as $\nu_{\text{eff}}=-\ln(E/E_0)/[2(k_x^2+k_y^2)\,t]$.
 - **Compared to.** The analytically imposed $\nu$. Because there are no walls,
   this isolates the collision operator alone.
 - **Result.** $\nu_{\text{eff}}$ matches $\nu$ to **0.07 %** ($64^2$, 3000
@@ -357,9 +356,12 @@ with $L_{\text{ch}}$ the characteristic length named below.
 
 For the channel and cavity cases the wall planes lie at $y=1/2$ and $y=N-3/2$,
 and the macroscopic fields of wall cells are ghost-filled,
-$\mathbf{u}_{\text{ghost}}=2\,\mathbf{u}_{\text{wall}}-\mathbf{u}_{\text{fluid}}$,
-so that bilinear sampling reads exactly $\mathbf{u}_{\text{wall}}$ on the wall
-plane.
+
+```math
+\mathbf{u}_{\text{ghost}}=2\,\mathbf{u}_{\text{wall}}-\mathbf{u}_{\text{fluid}},
+```
+
+so that bilinear sampling reads exactly the wall velocity on the wall plane.
 
 #### 4. Lid-driven cavity
 
