@@ -265,6 +265,8 @@ int main(int argc, char** argv)
         }
         if (!strcmp(argv[a], "--porous"))
             return runPorousGate() ? 1 : 0;
+        if (!strcmp(argv[a], "--order"))
+            return runOrderStudy() ? 1 : 0;
         if (!strcmp(argv[a], "--xtest"))
             return runXTest() ? 1 : 0;
         if (!strcmp(argv[a], "--bench"))

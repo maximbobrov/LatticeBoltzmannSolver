@@ -1,12 +1,13 @@
-# LBM — a D2Q9 Lattice Boltzmann solver (CPU + CUDA)
+# A D2Q9 Lattice Boltzmann Solver with Single-Source CPU/GPU Execution and a Benchmark-Driven Verification Suite
 
-Interactive 2D incompressible-flow solver based on the Lattice Boltzmann
-Method: five classic scenarios, each with
-a quantitative reference (exact solution or published benchmark), live
-solver-vs-reference plots in the GUI, and a set of command-line gates that
-validate every ingredient of the discretization. The CPU and GPU cores execute
-**literally the same code**, so they can be cross-checked to machine
-precision.
+An interactive two-dimensional incompressible-flow solver built on the
+lattice Boltzmann method (LBM). The numerical core is written **once** and
+compiled unchanged for both the CPU (OpenMP) and the GPU (CUDA), so the two
+back-ends are provably identical to floating-point round-off. Seven canonical
+flows are provided, each paired with an analytic solution or a published
+benchmark, together with a command-line verification suite: unit checks on the
+discrete operator, an observed-order-of-accuracy study, established benchmark
+comparisons, and a bit-exact CPU/GPU cross-check.
 
 Kármán vortex street:
 <img width="1919" height="1026" alt="image" src="https://github.com/user-attachments/assets/438407ae-461f-4057-890b-e052b423c00b" />
@@ -14,350 +15,449 @@ Kármán vortex street:
 Porous medium:
 <img width="1919" height="1027" alt="image" src="https://github.com/user-attachments/assets/9615eecd-dd9e-4a14-9979-3564fd6ff024" />
 
-## 1. Physics and mathematics
+---
 
-### 1.1 The idea of LBM
+## 1. Governing method
 
-Instead of discretizing the Navier–Stokes equations directly, LBM evolves a
-set of particle distribution functions `f_i(x, t)` on a regular lattice. Each
-`f_i` is the density of particles moving with one of a small set of discrete
-velocities `e_i`. One time step consists of two operations:
+### 1.1 The lattice Boltzmann equation
 
-1. **Collision** — at every node the distributions relax toward a local
-   equilibrium (BGK, single relaxation time τ):
+Rather than discretising the Navier–Stokes equations directly, LBM evolves a
+set of discrete-velocity distribution functions $f_i(\mathbf{x},t)$ on a
+regular lattice, where $f_i$ is the population of particles moving with the
+lattice velocity $\mathbf{e}_i$. Each time step is the composition of a local
+**collision** and a **streaming** shift. With the single-relaxation-time
+Bhatnagar–Gross–Krook (BGK) operator,
 
-   ```
-   f_i*(x,t) = f_i(x,t) − (1/τ) [ f_i(x,t) − f_i^eq(ρ,u) ]
-   ```
+```math
+f_i^{\star}(\mathbf{x},t) = f_i(\mathbf{x},t) - \frac{1}{\tau}\Big[\,f_i(\mathbf{x},t) - f_i^{\mathrm{eq}}(\rho,\mathbf{u})\,\Big],
+```
 
-2. **Streaming** — post-collision values hop to the neighbouring node along
-   their velocity:
+```math
+f_i(\mathbf{x}+\mathbf{e}_i,\,t+1) = f_i^{\star}(\mathbf{x},t),
+```
 
-   ```
-   f_i(x + e_i, t+1) = f_i*(x, t)
-   ```
-
-A Chapman–Enskog expansion shows that in the low-Mach limit this system
-solves the weakly compressible Navier–Stokes equations with kinematic
+where $\tau$ is the relaxation time and $f_i^{\star}$ the post-collision state.
+A Chapman–Enskog expansion shows that, in the low-Mach limit, this system
+recovers the weakly compressible Navier–Stokes equations with kinematic
 viscosity
 
-```
-ν = c_s² (τ − 1/2),      c_s² = 1/3   (lattice speed of sound)
-```
-
-so `τ = 3ν + 1/2`. Everything is in *lattice units*: Δx = Δt = 1, density
-ρ ≈ 1. The physical regime is set purely by the Reynolds number
-`Re = U·L/ν`, where `U = u_lat` (the velocity scale, kept ≤ 0.1 so that
-compressibility errors ~O(Ma²) stay small; Ma = u_lat·√3) and `L` is the
-scenario's characteristic length in cells.
-
-### 1.2 The D2Q9 lattice
-
-Nine velocities: rest, four axis directions, four diagonals.
-
-```
-   6  2  5        w_0     = 4/9
-   3  0  1        w_1..4  = 1/9    (axis)
-   7  4  8        w_5..8  = 1/36   (diagonal)
+```math
+\nu = c_s^{2}\Big(\tau-\tfrac12\Big),\qquad c_s^{2}=\tfrac13,\qquad \Longrightarrow\qquad \tau = 3\nu + \tfrac12 ,
 ```
 
-Equilibrium (second-order truncated Maxwellian):
+$c_s$ being the lattice speed of sound. All quantities are expressed in lattice
+units ($\Delta x=\Delta t=1$, reference density $\rho_0=1$). The physical
+regime is set solely by the Reynolds number, with the lattice Mach number kept
+small to control the $\mathcal{O}(\mathrm{Ma}^2)$ compressibility error:
 
-```
-f_i^eq = w_i ρ [ 1 + 3(e_i·u) + 4.5(e_i·u)² − 1.5 u² ]
-```
-
-Macroscopic fields are moments of `f`:
-
-```
-ρ = Σ_i f_i,        ρu = Σ_i f_i e_i  ( + F/2 with forcing, see below )
+```math
+\mathrm{Re}=\frac{U L}{\nu},\qquad \mathrm{Ma}=\frac{U}{c_s}=\sqrt{3}\,u_{\text{lat}},\qquad u_{\text{lat}}\lesssim 0.1 .
 ```
 
-The moments of `f^eq` reproduce mass, momentum and the Euler stress exactly
-(`Σ f^eq e e = ρ(c_s² I + uu)`) — this is verified numerically in the first
-self-test.
+Here $U=u_{\text{lat}}$ is the velocity scale and $L$ the characteristic length
+of the flow in lattice cells.
 
-### 1.3 Body force — Guo forcing
+### 1.2 The D2Q9 velocity set
 
-For the force-driven channel (Poiseuille) a constant body force `F = (g_x,0)`
-is applied with the scheme of Guo et al. (2002), which is second-order
-accurate and free of spurious `τ`-dependent terms:
+The model uses nine velocities — one rest, four axial, four diagonal:
 
-```
-u        = ( Σ f_i e_i + F/2 ) / ρ                       (velocity shift)
-F_i      = w_i (1 − 1/(2τ)) [ 3(e_i − u) + 9(e_i·u) e_i ] · F
-f_i^new  = f_i − (1/τ)(f_i − f_i^eq) + F_i
+```math
+\mathbf{e}_0=(0,0),\quad
+\mathbf{e}_{1\text{–}4}=(\pm1,0),(0,\pm1),\quad
+\mathbf{e}_{5\text{–}8}=(\pm1,\pm1),
 ```
 
-The channel force is chosen as `g_x = 8νU/H²` so the analytic peak velocity
-equals exactly `u_lat`.
+with lattice weights
+
+```math
+w_0=\tfrac{4}{9},\qquad w_{1\text{–}4}=\tfrac{1}{9},\qquad w_{5\text{–}8}=\tfrac{1}{36}.
+```
+
+The second-order (truncated Maxwellian) equilibrium is
+
+```math
+f_i^{\mathrm{eq}} = w_i\,\rho\left[\,1 + 3(\mathbf{e}_i\!\cdot\!\mathbf{u}) + \tfrac{9}{2}(\mathbf{e}_i\!\cdot\!\mathbf{u})^2 - \tfrac{3}{2}\,\mathbf{u}^2\,\right],
+```
+
+in which the coefficients are $c_s^{-2}=3$, $\tfrac12 c_s^{-4}=\tfrac92$ and
+$\tfrac12 c_s^{-2}=\tfrac32$. The hydrodynamic moments are
+
+```math
+\rho=\sum_i f_i,\qquad \rho\,\mathbf{u}=\sum_i f_i\,\mathbf{e}_i + \tfrac12\mathbf{F},
+```
+
+the $\tfrac12\mathbf{F}$ term being the forcing correction of §1.3. By
+construction the equilibrium reproduces the mass, momentum and Euler stress
+moments exactly,
+
+```math
+\sum_i f_i^{\mathrm{eq}}=\rho,\qquad
+\sum_i f_i^{\mathrm{eq}}\mathbf{e}_i=\rho\mathbf{u},\qquad
+\sum_i f_i^{\mathrm{eq}}\mathbf{e}_i\mathbf{e}_i=\rho\big(c_s^{2}\mathbf{I}+\mathbf{u}\mathbf{u}\big),
+```
+
+a set of identities verified to machine precision by the first unit test (§3).
+
+### 1.3 Body force (Guo scheme)
+
+A constant body force $\mathbf{F}=(g_x,0)$ drives the Poiseuille channel. The
+scheme of Guo, Zheng & Shi (2002) is used, which is second-order accurate and
+free of spurious $\tau$-dependent terms. The velocity carries a half-force
+shift, and a forcing population is added after collision:
+
+```math
+\mathbf{u} = \frac{1}{\rho}\left(\sum_i f_i\,\mathbf{e}_i + \tfrac12\mathbf{F}\right),
+```
+
+```math
+F_i = w_i\left(1-\frac{1}{2\tau}\right)\Big[\,3(\mathbf{e}_i-\mathbf{u}) + 9(\mathbf{e}_i\!\cdot\!\mathbf{u})\,\mathbf{e}_i\,\Big]\cdot\mathbf{F},
+```
+
+```math
+f_i^{\star} = f_i - \frac{1}{\tau}\big(f_i - f_i^{\mathrm{eq}}\big) + F_i .
+```
+
+For a channel of half-plane-to-half-plane height $H$, the force is chosen as
+$g_x = 8\nu U/H^2$ so that the analytic centre-line velocity equals exactly
+$u_{\text{lat}}$.
 
 ### 1.4 Boundary conditions
 
-| Cell type   | Rule |
-|-------------|------|
+| Cell type | Rule |
+|-----------|------|
 | `CT_FLUID`  | full stream + collide |
-| `CT_SOLID`  | **halfway bounce-back**: a population about to leave a fluid cell toward a wall cell returns reversed in the same step: `f_ī(x_f, t+1) = f_i*(x_f, t)`. The no-slip plane sits **half a cell** beyond the last fluid node — second-order accurate wall placement. Hence an N-cell box has an effective size of N−2 cells between wall planes. |
-| `CT_MOVING` | bounce-back plus the wall-momentum correction `+ 6 w_i (e_i · u_w)` (i.e. `2 w_i ρ₀ (e_i·u_w)/c_s²` with ρ₀ = 1). Drives the cavity/Couette lid. |
-| `CT_INLET`  | equilibrium inlet: `f_i = f_i^eq(ρ=1, u_in)` imposed every step. |
-| `CT_OUTLET` | first-order outflow: the outlet column copies the full population set of its upstream neighbour (zero-gradient in f). |
+| `CT_SOLID`  | **halfway bounce-back** — a population directed into a wall cell is reflected within the same step (see below). The no-slip plane lies half a cell beyond the last fluid node, giving second-order wall placement; an $N$-cell box therefore has an effective width of $N-2$ cells between wall planes. |
+| `CT_MOVING` | halfway bounce-back with a wall-momentum term (moving lid). |
+| `CT_INLET`  | equilibrium inlet, $f_i=f_i^{\mathrm{eq}}(\rho{=}1,\mathbf{u}_{\text{in}})$, imposed every step (uniform, or a prescribed parabolic profile for the step case). |
+| `CT_OUTLET` | first-order outflow — the outlet column copies the populations of its upstream neighbour (zero-gradient in $f$). |
 
-Periodic directions (Taylor–Green both axes, channels in x) are handled by
-index wrapping during streaming; non-periodic edges are always fenced by a
-one-cell layer of boundary cells.
+Halfway bounce-back reflects the population into the fluid cell along the
+opposite direction $\bar\imath$ (with $\mathbf{e}_{\bar\imath}=-\mathbf{e}_i$):
 
-### 1.5 Forces on immersed bodies — momentum exchange
+```math
+f_i(\mathbf{x}_f,\,t+1) = f_{\bar\imath}^{\star}(\mathbf{x}_f,\,t)\ +\ 2\,w_i\,\rho_0\,\frac{\mathbf{e}_i\!\cdot\!\mathbf{u}_w}{c_s^{2}},
+```
 
-The drag/lift on the cylinder is accumulated over all fluid→solid links: each
-bounced population transfers momentum `2 f_i* e_i` per step (static wall).
-Coefficients use the standard normalization `Cd = F_x / (½ ρ₀ U² D)`,
-`Cl = F_y / (½ ρ₀ U² D)`. The Strouhal number is measured from the mean
-period between upward zero crossings of the `Cl(t)` history:
-`St = D / (U·T)`.
+where the last term (with $2\rho_0/c_s^{2}=6$ for $\rho_0=1$) vanishes for a
+static wall and injects the wall momentum for a moving one. Periodic
+directions are handled by index wrapping during streaming; every non-periodic
+edge is fenced by a one-cell layer of boundary cells.
 
-### 1.6 Algorithmic form: fused pull step
+### 1.5 Force on immersed bodies (momentum exchange)
 
-The implementation uses the *pull* formulation, fused into a single pass per
-cell (better for GPUs — one kernel, coalesced reads/writes, no separate
-streaming sweep):
+The hydrodynamic force on the cylinder is accumulated over every fluid→solid
+link by the momentum-exchange method: each reflected population transfers
+$2 f_i^{\star}\mathbf{e}_i$ per step. The drag and lift coefficients and the
+Strouhal number follow the standard definitions
+
+```math
+C_d=\frac{F_x}{\tfrac12\rho_0 U^{2} D},\qquad
+C_l=\frac{F_y}{\tfrac12\rho_0 U^{2} D},\qquad
+\mathrm{St}=\frac{D}{U\,T},
+```
+
+$D$ being the cylinder diameter and $T$ the shedding period, measured from the
+mean interval between upward zero-crossings of $C_l(t)$.
+
+### 1.6 Algorithmic form
+
+The update is cast in the *pull* formulation and fused into a single pass per
+cell — one kernel, coalesced reads and writes, no separate streaming sweep:
 
 ```
 for every cell x:
-    gather  f_i  from  x − e_i          (bounce-back resolved during gather)
-    ρ, u    from the gathered set        (+ F/2 correction)
-    collide (BGK + Guo term)
-    write the post-collision set to the second buffer
-swap buffers (ping-pong)
+    gather   f_i  from  x − e_i        (bounce-back resolved during the gather)
+    ρ, u     from the gathered set      (+ ½F correction)
+    collide  (BGK + Guo forcing term)
+    write    the post-collision set to the second buffer
+swap buffers   (ping-pong)
 ```
 
-Storage is SoA: `f[i·NX·NY + y·NX + x]`, two buffers of 9 double-precision
-fields each.
+Storage is structure-of-arrays, $f[i\,N_xN_y + y\,N_x + x]$, two
+double-precision buffers of nine fields.
 
 ---
 
-## 2. Code architecture — what runs where
+## 2. Implementation: single-source CPU/GPU
 
 ```
-lattice.h        THE physics. lbmCellUpdate() / lbmFeq() / lbmMacroAt(),
-                 written once, marked __host__ __device__.
-lbm_core.cpp     CPU core: state arrays, OpenMP stepping loop, macro fields,
-                 diagnostics (mass, energy, nu_eff, Cd/Cl/St ring buffer).
-scenarios.cpp    applyScenario() (derived parameters) + buildFlags() (cell-
-                 type maps: walls, lid, inlet/outlet, cylinder mask).
-validation.cpp   reference solutions, Ghia tables, profile panels, self-test
-                 gates, CPU-vs-GPU check, cavity/cylinder benchmark gates,
-                 MLUPS benchmark.
-viz.cpp          freeglut/OpenGL: field as one texture (98th-percentile
-                 robust color scaling), velocity arrows, color bar, HUD,
-                 key legend, solver-vs-reference panels, Cl(t) strip.
-main_app.cpp     GLUT loop, keyboard, CPU/GPU switching, CLI dispatch,
-                 CUDA stubs for non-CUDA builds.
-cuda_kernels.h   plain-C++ GPU interface (no CUDA types leak out).
-cuda_kernels.cu  CUDA core: thin per-cell kernel wrappers around lattice.h.
+lattice.h        the physics: lbmCellUpdate() / lbmFeq() / lbmMacroAt(),
+                 written once and marked __host__ __device__
+lbm_core.cpp     CPU core: state, OpenMP stepping, macroscopic fields,
+                 diagnostics (mass, energy, ν_eff, C_d/C_l/St history)
+scenarios.cpp    applyScenario() derived parameters + buildFlags() cell maps
+validation.cpp   analytic references, Ghia tables, order study, benchmark gates
+viz.cpp          freeglut/OpenGL rendering, dimensional axes, comparison panels
+main_app.cpp     GLUT loop, keyboard, CPU/GPU switching, CLI dispatch
+cuda_kernels.*   CUDA core: thin per-cell kernel wrappers around lattice.h
 ```
 
-### The single-source CPU/GPU design
+The routine `lbmCellUpdate()` in [`lattice.h`](lattice.h) *is* the entire
+numerical method. It is compiled twice: on the CPU an OpenMP `parallel for`
+calls it per cell; on the GPU a CUDA kernel launches one thread per cell and
+calls **the same function** (the macro `LBM_HD` expands to
+`__host__ __device__ __forceinline__` under `nvcc`, and to `inline`
+otherwise). Two consequences follow. First, there is a single implementation
+of the physics to reason about and maintain. Second, the two back-ends are
+required to agree bitwise: after 200 cavity steps the measured discrepancy is
+$\max_i|f_i^{\text{GPU}}-f_i^{\text{CPU}}| = 8.3\times10^{-16}$, i.e. pure
+fused-multiply-add round-off (§3, `--gpucheck`).
 
-`lbmCellUpdate()` in [lattice.h](lattice.h) is the entire numerical method.
-It is compiled twice:
-
-- **CPU**: an OpenMP `parallel for` over rows calls it per cell
-  (`lbm_core.cpp`).
-- **GPU**: a CUDA kernel launches one thread per cell and calls *the same
-  function* (`cuda_kernels.cu`); `LBM_HD` expands to
-  `__host__ __device__ __forceinline__` under nvcc and to `inline` otherwise.
-
-Consequences:
-
-- there is exactly one implementation of the physics to debug;
-- `--gpucheck` demands the two cores agree: after 200 steps of the cavity the
-  measured difference is `max|f_gpu − f_cpu| = 8.3·10⁻¹⁶` — pure FMA
-  roundoff, i.e. bit-level equivalence of the algorithm.
-
-### Division of labour in GPU mode
-
-Everything hot stays resident on the device: the two ping-pong `f` buffers
-and the flag field are uploaded once (`gpuLbmInit`), then `gpuLbmSteps(n)`
-runs n fused kernels back to back. Per display frame only the three macro
-fields (ρ, u_x, u_y — computed by a device kernel) are downloaded, 3× less
-traffic than pulling the 9 distributions. For the cylinder, a small
-momentum-exchange kernel with atomic adds runs per step over a box around the
-body and the per-step force history is downloaded once per batch. The full
-`f` state is downloaded only when switching GPU→CPU (the toggle is seamless
-mid-run) or for `--gpucheck`.
-
-The CPU path exists on its own merit (runs without any CUDA toolkit — the
-`.pro` file detects nvcc and falls back to stubs) and as the reference for
-the GPU. Measured on a 128² cavity: **88 MLUPS** CPU (OpenMP) vs
-**599 MLUPS** GPU (RTX 5070 Laptop; kernel-launch bound at this tiny size —
-the gap widens on larger grids).
+In GPU mode the two distribution buffers and the flag field are uploaded once;
+`gpuLbmSteps(n)` then runs $n$ fused kernels back-to-back on the device, and
+only the three macroscopic fields are copied back per rendered frame. On a
+$128^2$ cavity the throughput is **88 MLUPS** on the CPU (OpenMP) versus
+**599 MLUPS** on the GPU (RTX 5070 Laptop); the gap widens on larger grids,
+the small case being launch-bound. The CPU path is fully functional without any
+CUDA toolkit — the build detects `nvcc` and falls back to stubs — and serves
+as the reference implementation for the GPU cross-check.
 
 ---
 
-## 3. Scenarios and validation
+## 3. Verification
 
-Validation is the point of this project. Every scenario isolates one
-ingredient of the method and has a quantitative reference; the GUI overlays
-the live solver profile (yellow) on the reference (cyan curve / white “+”
-scatter) with the relative L2 error and a GOOD/FAIR/POOR verdict.
+Verification follows the standard hierarchy for lattice Boltzmann codes
+(Krüger et al. 2017, ch. 4): (i) unit checks on the discrete operator;
+(ii) analytic-solution flows with a grid-convergence study establishing the
+design order of accuracy; (iii) comparison against established benchmarks;
+and (iv) a code-to-code cross-check between the two back-ends. All checks are
+reproducible from the command line (§4) and return an exit code equal to the
+number of failed gates.
 
-| # | Scenario (key `O`) | What it isolates | Reference | Result |
-|---|--------------------|------------------|-----------|--------|
-| 1 | **Taylor–Green vortex** — periodic decaying vortex array | collision + streaming, *no walls at all* | exact transient `u = −U cos kx sin ky · e^{−2νk²t}`; effective viscosity measured from kinetic-energy decay `E ~ e^{−4νk²t}` | ν_eff error **0.07 %** |
-| 2 | **Poiseuille** — force-driven channel | bounce-back walls + Guo forcing | exact parabola `u = 4U s(1−s)`, wall-to-wall coordinate `s` | L2 **0.10 %** |
-| 3 | **Couette** — lid-dragged channel | moving-wall bounce-back | exact linear profile `u = U s` | L2 **0.03 %** |
-| 4 | **Lid-driven cavity** | everything together, steady nonlinear flow | Ghia, Ghia & Shin, *J. Comput. Phys.* 48 (1982): tabulated center-line profiles, Re = 100 and Re = 1000 | Re=100: L2 **0.5 % / 2.4 %** (u/v); Re=1000: **1.5 % / 2.1 %** |
-| 5 | **Cylinder in channel** — Kármán vortex street | inlet/outlet, momentum exchange, unsteady flow | St ≈ 0.164 at Re = 100 (unbounded reference; blockage D/H = 1/8), Cd ≈ 1.3–1.4 | **St = 0.1637**, Cd = 1.33, Cl_amp = 0.28 |
-| 6 | **Backward-facing step** — 1:2 sudden expansion, parabolic (developed) inflow | separation and reattachment; the parabolic-inlet machinery | reattachment length, Armaly et al. (1983): x_r/S ≈ 3 (Re=100), ≈ 5 (Re=200), ≈ 8 (Re=400); Re on the inlet hydraulic diameter | **x_r/S = 4.18** at Re = 200 |
-| 7 | **Porous medium** — random overlapping grains (fixed seed), fully periodic, force-driven | flow in complex geometry — the signature LBM application | Darcy's law: `⟨u_sup⟩ = K·g/ν`, so the permeability K must be a property of the geometry alone | K ≈ 8 cells² at ε = 0.71; K drifts **6.8 %** between τ = 0.74 and 0.62 — the known BGK+bounce-back artifact (wall position depends on τ; Pan, Luo & Miller 2006), the ready-made gate for a TRT upgrade |
+### 3.1 Unit tests on the discrete operator
+
+- **Equilibrium moments** — the mass, momentum and Euler-stress moments of
+  $f_i^{\mathrm{eq}}$ (§1.2) are reproduced to
+  $1.4\times10^{-16}$.
+- **Mass conservation** — halfway bounce-back is exactly conservative; the
+  relative drift over 300 cavity steps is $4.5\times10^{-13}$.
+- **CPU $\equiv$ GPU** — bit-level agreement,
+  $8.3\times10^{-16}$ after 200 steps.
+
+### 3.2 Order of accuracy
+
+The design accuracy is confirmed on the Taylor–Green vortex, which has the
+exact solution
+
+```math
+\mathbf{u}(\mathbf{x},t) = U\!\begin{pmatrix}-\cos k_x x\,\sin k_y y\\[2pt]\ \ \sin k_x x\,\cos k_y y\end{pmatrix}e^{-\nu(k_x^2+k_y^2)\,t},\qquad k_x=k_y=\frac{2\pi}{N},
+```
+
+with kinetic energy decaying as $E(t)=E_0\,e^{-2\nu(k_x^2+k_y^2)t}$. Under
+**diffusive scaling** — the relaxation time $\tau$ (hence the lattice
+viscosity) held fixed, $\mathrm{Ma}\sim 1/N$, and the integration carried to a
+fixed physical time so that the step count grows as $N^2$ — both the spatial
+truncation error and the $\mathcal{O}(\mathrm{Ma}^2)$ compressibility error are
+$\mathcal{O}(\Delta x^2)$. The relative $L_2$ velocity error and the observed
+order,
+
+```math
+\varepsilon_2(N)=\frac{\lVert \mathbf{u}_h-\mathbf{u}_{\text{exact}}\rVert_2}{\lVert \mathbf{u}_{\text{exact}}\rVert_2},\qquad
+p=\frac{\ln\!\big[\varepsilon_2(N_1)/\varepsilon_2(N_2)\big]}{\ln(N_2/N_1)},
+```
+
+are (`--order`, $\tau=0.8$):
+
+| $N$ | $u_{\text{lat}}$ | steps | $\varepsilon_2$ | order $p$ |
+|----:|------:|------:|:-----------:|:---------:|
+| 32  | 0.0400 | 130  | $4.85\times10^{-3}$ | — |
+| 64  | 0.0200 | 520  | $1.22\times10^{-3}$ | 1.99 |
+| 128 | 0.0100 | 2080 | $3.00\times10^{-4}$ | 2.03 |
+| 256 | 0.0050 | 8320 | $7.67\times10^{-5}$ | 1.96 |
+
+The observed order $p\approx 1.96$ confirms the expected second-order
+convergence of the BGK scheme with halfway bounce-back.
+
+### 3.3 Benchmark flows
+
+Each scenario isolates one ingredient of the method and is compared against an
+analytic solution or a tabulated benchmark; the GUI overlays the live solver
+profile on the reference with the relative $L_2$ error and a verdict.
+
+| # | Scenario (key `O`) | Ingredient exercised | Reference | Result |
+|---|--------------------|----------------------|-----------|--------|
+| 1 | **Taylor–Green vortex** — periodic decaying array | bulk collision + streaming, no walls | exact decay; $\nu_{\text{eff}}$ from the energy history | $\nu_{\text{eff}}$ error **0.07 %** |
+| 2 | **Poiseuille** — force-driven channel | bounce-back walls + Guo forcing | exact parabola $u=4Us(1-s)$ | $L_2$ **0.10 %** |
+| 3 | **Couette** — lid-dragged channel | moving-wall bounce-back | exact linear $u=Us$ | $L_2$ **0.03 %** |
+| 4 | **Lid-driven cavity** | full nonlinear steady flow | Ghia, Ghia & Shin (1982), $\mathrm{Re}=100,\,1000$ | Re 100: $L_2$ **0.5 % / 2.4 %**; Re 1000: **1.5 % / 2.1 %** |
+| 5 | **Cylinder in channel** — Kármán street | inlet/outlet, momentum exchange, unsteady wake | $\mathrm{St}\approx0.164$ at $\mathrm{Re}=100$ (Williamson 1996) | **St = 0.1637**, $C_d=1.33$ |
+| 6 | **Backward-facing step** — 1:2 sudden expansion | separation / reattachment, parabolic inflow | reattachment $x_r/S$, Armaly et al. (1983) | **$x_r/S=4.18$** at $\mathrm{Re}=200$ |
+| 7 | **Porous medium** — random grains, periodic, force-driven | flow in complex geometry (signature LBM use) | Darcy's law (below) | $K\approx8$ cells², $\varepsilon=0.71$ |
 
 <img width="1919" height="1031" alt="image" src="https://github.com/user-attachments/assets/75c98d54-fe35-414c-89f4-3bda9b5435ed" />
 
+**Taylor–Green.** The effective viscosity recovered from the energy decay,
 
-Additional structural gates (all in `--selftest`):
+```math
+\nu_{\text{eff}}=-\frac{\ln\!\big(E/E_0\big)}{2(k_x^2+k_y^2)\,t},
+```
 
-- **f^eq moments** — mass / momentum / Euler stress of the discrete
-  equilibrium are exact: error 1.4·10⁻¹⁶;
-- **mass conservation** — bounce-back is conservative; drift over 300 cavity
-  steps: 4.5·10⁻¹³ (relative);
-- **CPU ≡ GPU** — 8.3·10⁻¹⁶ after 200 steps (see above).
+matches the imposed $\nu$ to 0.07 %, isolating the collision operator from any
+wall treatment.
 
-Wall-coordinate subtlety used throughout the validation: with halfway
-bounce-back the wall planes sit at Y = 0.5 and Y = NY−1.5, so profiles are
-compared in the normalized coordinate `s = (j − 0.5)/(N−2)`, and the macro
-fields of wall cells are *ghost-filled* (`u_ghost = 2u_wall − u_fluid`) so
-that bilinear sampling reads exactly `u_wall` on the wall plane.
+**Channel flows.** With the wall planes at $y=\tfrac12$ and $y=N-\tfrac32$, the
+profiles are compared in the normalised coordinate $s=(y-\tfrac12)/(N-2)$, and
+the macroscopic fields of wall cells are ghost-filled,
+$\mathbf{u}_{\text{ghost}}=2\mathbf{u}_{\text{wall}}-\mathbf{u}_{\text{fluid}}$,
+so that bilinear sampling reads exactly $\mathbf{u}_{\text{wall}}$ on the wall
+plane.
+
+**Cavity.** Centre-line profiles $u(y)$ at $x^*=0.5$ and $v(x)$ at $y^*=0.5$
+are compared against the tabulated data of Ghia, Ghia & Shin (1982) at
+$\mathrm{Re}=100$ and $1000$ — the de-facto standard benchmark for
+incompressible cavity flow.
+
+**Cylinder.** At $\mathrm{Re}=100$ the wake sheds a periodic Kármán street; the
+measured Strouhal number $\mathrm{St}=0.1637$ lies within the accepted band for
+a circular cylinder ($\mathrm{St}\approx0.164$–$0.166$, Williamson 1996; the
+small confinement, blockage $D/H=1/8$, shifts it slightly), and the mean drag
+$C_d=1.33$ is consistent with the laminar-shedding literature.
+
+**Backward-facing step.** The lower-wall recirculation reattaches at
+$x_r/S=4.18$ at $\mathrm{Re}=200$, in the range reported by Armaly et al.
+(1983) for the two-dimensional laminar regime.
+
+**Porous medium.** Darcy's law relates the superficial (whole-volume-averaged)
+velocity to the driving force through a geometry-only permeability $K$,
+
+```math
+\langle u\rangle_{\text{sup}}=\frac{K}{\nu}\,g_x
+\qquad\Longrightarrow\qquad
+K=\frac{\nu\,\langle u\rangle_{\text{sup}}}{g_x},
+\qquad
+\langle u\rangle_{\text{sup}}=\frac{1}{N_xN_y}\!\!\sum_{\text{fluid}}\!u_x .
+```
+
+Measuring $K$ at two viscosities isolates a *known* limitation of the plain
+BGK/bounce-back combination: the effective wall position depends weakly on
+$\tau$, so $K$ drifts by 6.8 % between $\tau=0.74$ and $0.62$ (Pan, Luo &
+Miller 2006). The gate reports this drift and thereby doubles as a ready-made
+target for a two-relaxation-time (TRT) upgrade, which pins the wall for all
+$\tau$ via the magic parameter $\Lambda=\tfrac{3}{16}$.
 
 ---
 
 ## 4. Building and running
 
-Requirements: MSVC 2022, Qt's qmake (build system only — no Qt libraries),
-freeglut via vcpkg, optionally the CUDA toolkit (auto-detected; without it
-the app builds CPU-only).
+Requirements: MSVC 2022, Qt's `qmake` (build system only — no Qt libraries),
+freeglut via vcpkg, and optionally the CUDA toolkit (auto-detected; without it
+the application builds CPU-only). Paths are taken from the `QTDIR`,
+`VCPKG_ROOT` and `CUDA_PATH` environment variables.
 
 ```bash
 ./build.bat        # vcvars64 + qmake + nmake (+ copies freeglut.dll)
 ```
 
-### Command-line gates
+### Command-line verification gates
 
 ```bash
-./LBM.exe --selftest        # all structural gates; exit code = #failed
-./LBM.exe --gpucheck        # CPU vs GPU, 200 steps, max|df|
+./LBM.exe --selftest        # unit tests + channel gates; exit code = #failed
+./LBM.exe --order           # Taylor–Green grid-convergence (observed order p)
+./LBM.exe --gpucheck        # CPU vs GPU, 200 steps, reports max|Δf|
 ./LBM.exe --cavity 100      # cavity to steady state vs Ghia (or 1000)
-./LBM.exe --cylinder 100    # Karman street, measures St / Cd / Cl
-./LBM.exe --step 200        # backward-facing step, x_r/S vs Armaly
-./LBM.exe --porous          # Darcy gate: K at two viscosities must agree
-./LBM.exe --bench 2000      # MLUPS, CPU and GPU
-./LBM.exe --xtest           # headless replay of the GUI GPU-toggle paths
-./LBM.exe --auto            # hands-off GUI soak test (timers press the keys)
+./LBM.exe --cylinder 100    # Kármán street; measures St, C_d, C_l
+./LBM.exe --step 200        # backward-facing step; reattachment x_r/S
+./LBM.exe --porous          # Darcy gate: K at two viscosities
+./LBM.exe --bench 2000      # throughput (MLUPS), CPU and GPU
+./LBM.exe --xtest --auto    # headless / hands-off GUI soak tests
 ```
 
-### GUI controls
+### Interactive controls
 
 | Key | Action |
 |-----|--------|
 | `Space` / `B` / `N` | run–pause / single step / reset |
 | `O` | next scenario |
 | `X` | toggle CPU ↔ GPU core (state carried over, works mid-run) |
-| `1 2 3` | field: vorticity / \|u\| / ρ |
-| `8 9` | grid N ÷2 / ×2 |
-| `-` `=` | Re ÷2 / ×2 (τ recomputed on the fly) |
+| `1 2 3` | field: vorticity / $\lvert\mathbf{u}\rvert$ / $\rho$ |
+| `8 9` | grid $N$ ÷2 / ×2 |
+| `-` `=` | Reynolds number ÷2 / ×2 ($\tau$ recomputed on the fly) |
 | `S` | steps per frame 1/10/50/200/1000 |
 | `V`, `,` `.` | velocity arrows on/off, arrow length |
 | `G` | lattice grid lines overlay |
 | `U` | axis scale: physical cell size (0.01 … 1 mm/cell) — see note below |
-| `P` | passive tracer particles (massless markers advected by the macro velocity — LBM itself has no particles, this is flow visualization) |
-| left click | **cell probe**: highlights the cell and draws its 9 populations as arrows of the non-equilibrium part `f_i − f_i^eq` (orange = surplus, blue = deficit; the neq part carries the viscous stress), plus a table of `f_i`, `f_i^eq`, ρ, u. Right click hides it. Works in GPU mode too (the probed state is pulled from the device). |
-| `[` `]` | color brightness |
+| `P` | passive tracer particles (massless markers advected by $\mathbf{u}$; LBM has no particles — this is flow visualisation) |
+| left click | **cell probe**: draws the nine populations as arrows of the non-equilibrium part $f_i-f_i^{\mathrm{eq}}$ (which carries the viscous stress), plus a table of $f_i$, $f_i^{\mathrm{eq}}$, $\rho$, $\mathbf{u}$. Right click hides it. |
+| `[` `]` | colour brightness |
 | `K` / `T` | validation table / self-tests (console) |
 | `ESC` | quit |
 
-**A note on physical units.** LBM is intrinsically *dimensionless*: the lattice
-spacing and time step are both 1 lattice unit, and the only thing that fixes
-the physical regime is the Reynolds number. The size of the domain in metres is
-therefore not built into the method — it is a mapping you choose by fixing the
-physical length of a single cell (`dxPhys`, in metres). One number sets the
-scale for **every** scenario at once: the domain is simply `NX·dxPhys` by
-`NY·dxPhys`. The GUI draws dimensional axis rulers (auto-switching between
-µm / mm / m) and prints the domain size in the HUD; `U` cycles `dxPhys` from
-0.01 to 1 mm per cell (default 0.1 mm/cell, so a 128-cell box is 12.8 mm). To
-tie the simulation to a real experiment, pick `dxPhys` so the characteristic
-length (channel height, cavity side, cylinder diameter) matches the real one —
-the flow itself is unchanged, only the axis labels are.
+**A note on physical units.** LBM is intrinsically dimensionless: $\Delta x$
+and $\Delta t$ are both one lattice unit and the physical regime is fixed only
+by the Reynolds number. The size of the domain in metres is therefore a mapping
+the user chooses by fixing the physical length of one cell, $\delta x$ (metres
+per cell); a single number sets the scale for every scenario, the domain being
+$N_x\delta x \times N_y\delta x$. The GUI draws dimensional axis rulers
+(auto-switching between µm, mm and m) and reports the domain size; `U` cycles
+$\delta x$ from 0.01 to 1 mm/cell (default 0.1 mm/cell, so a 128-cell box is
+12.8 mm). To match a physical experiment, choose $\delta x$ so that the
+characteristic length agrees with the real one — the flow is unchanged, only
+the axis labels are.
 
 ---
 
-## 5. Known pitfalls (hard-won)
+## 5. Known limitations
 
-- **CUDA context must be created before the OpenGL window.** Creating it
-  lazily (first `cudaMalloc` when the user pressed `X`) with a live GL
-  context crashed inside `nvcuda64.dll` on an Optimus laptop (RTX 5070,
-  driver 580.88) — while the identical headless code path ran flawlessly.
-  Diagnosed from the Windows event log (faulting module) and a deterministic
-  `--auto` repro; fixed by `gpuWarmup()` (`cudaFree(0)`) in `main()` before
-  `glutInit()`. Applies to any CUDA+GL app on such systems.
-- **`nmake clean` after editing `lbm.h`** — the incremental build has been
-  seen linking stale objects after header changes, producing spurious access
-  violations.
-- **τ → 0.5 instability**: BGK becomes unstable as `τ` approaches 1/2
-  (high Re on a coarse grid). The app warns when τ < 0.51; the cures are a
-  finer grid (`9`), lower Re (`-`), or (as an extension) a TRT/MRT collision
-  operator.
-- **Compressibility**: errors grow as O(Ma²); keep `u_lat ≤ 0.1`. This is
-  visible experimentally: raising `u_lat` degrades the measured ν_eff in the
-  Taylor–Green gate.
+- **CUDA context before the GL window.** Creating the CUDA context lazily
+  (first `cudaMalloc`) while an OpenGL context is already live crashed inside
+  `nvcuda64.dll` on an Optimus laptop (RTX 5070, driver 580.88), whereas the
+  identical headless path ran cleanly. It is created eagerly in `main()` via
+  `gpuWarmup()` (`cudaFree(0)`) before `glutInit()`. This applies to any
+  CUDA + OpenGL application on such systems.
+- **$\tau\to\tfrac12$ instability.** The single-relaxation-time BGK operator
+  loses stability as $\tau\to\tfrac12$ (high Reynolds number on a coarse
+  grid); the application warns when $\tau<0.51$. Remedies are grid refinement,
+  a lower Reynolds number, or a TRT/MRT collision operator (§6).
+- **Compressibility.** Errors scale as $\mathcal{O}(\mathrm{Ma}^2)$; keeping
+  $u_{\text{lat}}\le0.1$ is required, and raising it visibly degrades the
+  Taylor–Green $\nu_{\text{eff}}$.
+- **Stair-cased curved walls.** The cylinder surface is voxelised; interpolated
+  (Bouzidi) bounce-back would recover its smooth outline and accelerate the
+  convergence of $C_d$ and $\mathrm{St}$.
 
-## 6. Pointers for extensions
+## 6. Possible extensions
 
-TRT/MRT collision (stability at high Re), Smagorinsky LES closure, thermal
-lattice (second distribution set for temperature → Rayleigh–Bénard, with the
-critical Rayleigh number 1708 as the next gate), interpolated bounce-back for
-curved walls (removes the staircase cylinder surface), Zou–He velocity/
-pressure boundaries, D3Q19 in 3D.
+Two-relaxation-time / multiple-relaxation-time collision (stability at high
+Reynolds number; the porous gate is already its acceptance test), a Smagorinsky
+large-eddy closure, a second distribution for temperature (Rayleigh–Bénard
+convection, with the critical Rayleigh number $\mathrm{Ra}_c=1708$ as the next
+gate), interpolated bounce-back for curved walls, Zou–He velocity/pressure
+boundaries, and an extension to three dimensions (D3Q19).
 
-## 7. References — where each piece of the physics comes from
+## 7. References
 
-The code is written from scratch for this project; every formula follows the
-standard formulations below (conventions match the Krüger et al. textbook).
+The code is written from scratch; the formulation follows the standard
+references below, with conventions matching the Krüger et al. textbook.
 
-- **D2Q9 BGK model** (velocity set, weights, `f^eq`, `ν = c_s²(τ−½)`):
-  Y. Qian, D. d'Humières, P. Lallemand, *Lattice BGK models for the
-  Navier–Stokes equation*, Europhys. Lett. **17** (1992) 479.
-- **Theory / Chapman–Enskog / method overview**: T. Krüger, H. Kusumaatmaja,
-  A. Kuzmin, O. Shardt, G. Silva, E. Viggen, *The Lattice Boltzmann Method:
-  Principles and Practice*, Springer (2017) — the de-facto standard textbook;
-  companion code: github.com/lbm-principles-practice. Also the classic
-  review: S. Chen, G. Doolen, Annu. Rev. Fluid Mech. **30** (1998) 329.
-- **Guo forcing scheme** (§1.3): Z. Guo, C. Zheng, B. Shi, *Discrete lattice
-  effects on the forcing term in the lattice Boltzmann method*, Phys. Rev. E
-  **65** (2002) 046308.
-- **Halfway bounce-back (2nd-order wall), moving-wall momentum term,
-  momentum-exchange force** (§1.4–1.5): A. J. C. Ladd, *Numerical
-  simulations of particulate suspensions via a discretized Boltzmann
-  equation. Part 1*, J. Fluid Mech. **271** (1994) 285; momentum exchange
-  refined in R. Mei, D. Yu, W. Shyy, L.-S. Luo, Phys. Rev. E **65** (2002)
-  041203.
-- **Cavity benchmark tables**: U. Ghia, K. N. Ghia, C. T. Shin,
-  *High-Re solutions for incompressible flow using the Navier–Stokes
-  equations and a multigrid method*, J. Comput. Phys. **48** (1982) 387.
-- **Taylor–Green vortex**: exact 2D Navier–Stokes solution (G. I. Taylor,
-  A. E. Green, Proc. R. Soc. A **158** (1937); the 2D decaying form used
-  here is the standard LBM accuracy test).
-- **Cylinder references**: St(Re=100) ≈ 0.164 from the circular-cylinder
-  literature (C. H. K. Williamson, Annu. Rev. Fluid Mech. **28** (1996));
-  the confined-channel benchmark variant is M. Schäfer, S. Turek,
-  *Benchmark computations of laminar flow around a cylinder* (1996).
-- **Backward-facing step references**: B. F. Armaly, F. Durst, J. C. F.
-  Pereira, B. Schönung, *Experimental and theoretical investigation of
-  backward-facing step flow*, J. Fluid Mech. **127** (1983) 473; the
-  sudden-expansion-at-inlet variant follows D. K. Gartling, Int. J. Numer.
-  Methods Fluids **11** (1990) 953.
-- **Permeability τ-dependence of BGK bounce-back** (the porous-gate
-  artifact): C. Pan, L.-S. Luo, C. T. Miller, *An evaluation of lattice
-  Boltzmann schemes for porous medium flow simulation*, Comput. Fluids
-  **35** (2006) 898.
-- **Well-known open-source LBM codes** (not used as a base, useful for
-  cross-reading): Palabos, OpenLB, and the minimal MATLAB/Python examples by
-  J. Latt (lbmethod.org lineage).
+1. Y. H. Qian, D. d'Humières, P. Lallemand, *Lattice BGK models for the
+   Navier–Stokes equation*, **Europhys. Lett. 17** (1992) 479. — D2Q9 BGK
+   model, weights, equilibrium, $\nu=c_s^2(\tau-\tfrac12)$.
+2. T. Krüger, H. Kusumaatmaja, A. Kuzmin, O. Shardt, G. Silva, E. M. Viggen,
+   *The Lattice Boltzmann Method: Principles and Practice*, **Springer**
+   (2017). — Chapman–Enskog analysis, verification methodology; companion
+   code at `github.com/lbm-principles-practice`.
+3. S. Chen, G. D. Doolen, *Lattice Boltzmann method for fluid flows*,
+   **Annu. Rev. Fluid Mech. 30** (1998) 329. — review.
+4. Z. Guo, C. Zheng, B. Shi, *Discrete lattice effects on the forcing term in
+   the lattice Boltzmann method*, **Phys. Rev. E 65** (2002) 046308. — forcing
+   scheme (§1.3).
+5. A. J. C. Ladd, *Numerical simulations of particulate suspensions via a
+   discretized Boltzmann equation. Part 1*, **J. Fluid Mech. 271** (1994) 285;
+   R. Mei, D. Yu, W. Shyy, L.-S. Luo, **Phys. Rev. E 65** (2002) 041203. —
+   moving-wall bounce-back and momentum-exchange force (§1.4–1.5).
+6. U. Ghia, K. N. Ghia, C. T. Shin, *High-Re solutions for incompressible flow
+   using the Navier–Stokes equations and a multigrid method*, **J. Comput.
+   Phys. 48** (1982) 387. — cavity benchmark.
+7. G. I. Taylor, A. E. Green, *Mechanism of the production of small eddies from
+   large ones*, **Proc. R. Soc. A 158** (1937) 499. — Taylor–Green vortex.
+8. C. H. K. Williamson, *Vortex dynamics in the cylinder wake*, **Annu. Rev.
+   Fluid Mech. 28** (1996) 477. — cylinder Strouhal number. Confined-channel
+   benchmark: M. Schäfer, S. Turek, *Benchmark computations of laminar flow
+   around a cylinder* (1996).
+9. B. F. Armaly, F. Durst, J. C. F. Pereira, B. Schönung, *Experimental and
+   theoretical investigation of backward-facing step flow*, **J. Fluid Mech.
+   127** (1983) 473; sudden-expansion variant: D. K. Gartling, **Int. J.
+   Numer. Methods Fluids 11** (1990) 953.
+10. C. Pan, L.-S. Luo, C. T. Miller, *An evaluation of lattice Boltzmann
+    schemes for porous medium flow simulation*, **Comput. Fluids 35** (2006)
+    898. — $\tau$-dependence of BGK bounce-back permeability.

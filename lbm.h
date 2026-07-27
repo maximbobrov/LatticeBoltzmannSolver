@@ -146,6 +146,7 @@ int         runCylinderGate(double Re);        // Karman street, St vs reference
 int         runStepGate(double Re);            // reattachment length vs Armaly
 int         runPorousGate();                   // Darcy: K invariant under nu
 int         runXTest();                        // headless GUI 'X'-toggle repro
+int         runOrderStudy();                   // Taylor-Green grid-convergence (observed order)
 
 // --- viz.cpp ---------------------------------------------------------------
 void initGL();

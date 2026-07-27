@@ -287,7 +287,10 @@ int runSelfTests()
         failed += gate("Couette L2 vs exact, H=32", v.panel[0].l2rel, 0.01);
     }
 
-    // 6. GPU == CPU (only if a CUDA device is present).
+    // 6. Observed order of accuracy (Taylor-Green grid convergence).
+    failed += runOrderStudy();
+
+    // 7. GPU == CPU (only if a CUDA device is present).
     if (gpuAvailable()) failed += runGpuCheck();
     else                printf("  [skip] GPU check: no CUDA device / built without CUDA\n");
 
@@ -329,6 +332,69 @@ int runGpuCheck()
     printf("  gpucheck [%s]: cavity 64^2 x%d  max|f_gpu-f_cpu| = %.3e  (max|f| = %.3f)\n",
            dmax / ref < 1e-9 ? "PASS" : "FAIL", nsteps, dmax, ref);
     return dmax / ref < 1e-9 ? 0 : 1;
+}
+
+// Relative L2 error of the whole velocity field vs the exact Taylor-Green
+// solution at the current step (sampled at the lattice nodes, matching the IC).
+static double tgVelL2()
+{
+    const double U = P.ulat, kx = 2.0*PI/P.NX, ky = 2.0*PI/P.NY;
+    const double A = exp(-P.nu * (kx*kx + ky*ky) * (double)stepCount);
+    double se = 0.0, sr = 0.0;
+    for (int j = 0; j < P.NY; j++)
+        for (int i = 0; i < P.NX; i++)
+        {
+            const int idx = j*P.NX + i;
+            const double ue = -U * cos(kx*i) * sin(ky*j) * A;
+            const double ve =  U * sin(kx*i) * cos(ky*j) * A;
+            const double du = ux[idx] - ue, dv = uy[idx] - ve;
+            se += du*du + dv*dv;
+            sr += ue*ue + ve*ve;
+        }
+    return sqrt(se / (sr + 1e-300));
+}
+
+// Grid-convergence / observed-order-of-accuracy study (--order), the classical
+// LBM verification (Krüger et al. 2017, ch. 4). Taylor-Green under DIFFUSIVE
+// scaling: hold tau (hence the lattice viscosity) fixed, shrink the Mach number
+// as u ~ 1/N, and integrate to the SAME physical time (steps ~ N^2). Both the
+// spatial truncation and the O(Ma^2) compressibility error are then O(dx^2), so
+// the velocity L2 error must fall as ~N^-2 (second order).
+int runOrderStudy()
+{
+    const double tau = 0.8, nu = (tau - 0.5) / 3.0;   // nu = 0.1, fixed
+    const double u0  = 0.04;                           // u_lat at N = 32
+    const int    Ns[4] = { 32, 64, 128, 256 };
+    const Params saveP = P;
+    printf("\n===== TAYLOR-GREEN GRID CONVERGENCE (diffusive scaling, tau=%.2f fixed) =====\n", tau);
+    printf("  %-6s %-9s %-8s %-11s %-6s\n", "N", "u_lat", "steps", "L2(u)", "order");
+    double prevErr = -1.0; int prevN = 0; int failed = 0; double lastOrder = 0.0;
+    for (int a = 0; a < 4; a++)
+    {
+        const int N = Ns[a];
+        P.scenario = SCN_TAYLOR_GREEN; P.N = N;
+        P.ulat = u0 * 32.0 / N;                        // Ma ~ 1/N
+        P.Re   = u0 * 32.0 / nu;                       // keeps nu=0.1, tau=0.8 at every N
+        applyScenario(); lbmAllocate(); buildFlags(); lbmInitFields();
+        const long long steps = (long long)(130.0 * (double)N * N / (32.0 * 32.0) + 0.5);
+        lbmStepsCPU((int)steps);
+        updateMacro();
+        const double err = tgVelL2();
+        if (prevErr > 0.0)
+        {
+            lastOrder = log(prevErr / err) / log((double)N / prevN);
+            printf("  %-6d %-9.4f %-8lld %-11.3e %-6.2f\n", N, P.ulat, steps, err, lastOrder);
+        }
+        else
+            printf("  %-6d %-9.4f %-8lld %-11.3e   -\n", N, P.ulat, steps, err);
+        prevErr = err; prevN = N;
+    }
+    failed = (lastOrder > 1.7 && lastOrder < 2.3) ? 0 : 1;
+    printf("  observed order -> %.2f   [%s]  (expected 2.0 for the second-order scheme)\n",
+           lastOrder, failed ? "FAIL" : "PASS");
+    printf("=================================================================================\n");
+    P = saveP;
+    return failed;
 }
 
 // Cavity benchmark gate (--cavity [Re]): run to steady state (on the GPU when
