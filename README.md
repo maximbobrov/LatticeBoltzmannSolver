@@ -9,11 +9,14 @@ benchmark, together with a command-line verification suite: unit checks on the
 discrete operator, an observed-order-of-accuracy study, established benchmark
 comparisons, and a bit-exact CPU/GPU cross-check.
 
-Kármán vortex street:
-<img width="1919" height="1026" alt="image" src="https://github.com/user-attachments/assets/438407ae-461f-4057-890b-e052b423c00b" />
+Kármán vortex street ( Re = 100; Grid: 768x256):
+CPU:
+<img width="1192" height="426" alt="20260727-1350-35 9667209" src="https://github.com/user-attachments/assets/a3f7e4b9-9381-493f-b6e0-f2a529cbbafd" />
 
-Porous medium:
-<img width="1919" height="1027" alt="image" src="https://github.com/user-attachments/assets/9615eecd-dd9e-4a14-9979-3564fd6ff024" />
+GPU:
+<img width="1192" height="430" alt="20260727-1351-29 1142332" src="https://github.com/user-attachments/assets/630db12f-2749-4355-b03a-d1763a827dd7" />
+
+
 
 ---
 
@@ -310,8 +313,6 @@ profile on the reference with the relative $L_2$ error and a verdict.
 | 6 | **Backward-facing step** — 1:2 sudden expansion | separation / reattachment, parabolic inflow | reattachment $x_r/S$, Armaly et al. (1983) | **$x_r/S=4.18$** at $\mathrm{Re}=200$ |
 | 7 | **Porous medium** — random grains, periodic, force-driven | flow in complex geometry (signature LBM use) | Darcy's law (below) | $K\approx8$ cells², $\varepsilon=0.71$ |
 
-<img width="1919" height="1031" alt="image" src="https://github.com/user-attachments/assets/75c98d54-fe35-414c-89f4-3bda9b5435ed" />
-
 The problem statement of each case follows. Throughout, $N$ is the base
 resolution (key `8`/`9`), $U=u_{\text{lat}}$ the velocity scale, and the
 viscosity is set from the target Reynolds number as $\nu=U L_{\text{ch}}/\mathrm{Re}$
@@ -330,6 +331,9 @@ with $L_{\text{ch}}$ the characteristic length named below.
 - **Result.** $\nu_{\text{eff}}$ matches $\nu$ to **0.07 %** ($64^2$, 3000
   steps).
 
+  <img width="1919" height="1031" alt="image" src="https://github.com/user-attachments/assets/21aee4b1-1136-4bea-a75a-e393b2fd8865" />
+
+
 #### 2. Poiseuille channel
 
 - **Geometry / BC.** Strip $N\times N$, **periodic in $x$**; the top and bottom
@@ -343,6 +347,9 @@ with $L_{\text{ch}}$ the characteristic length named below.
   $L_2$ norm along the profile.
 - **Result.** $L_2=$ **0.10 %** ($H=32$).
 
+<img width="1919" height="971" alt="image" src="https://github.com/user-attachments/assets/d8388d97-c64d-4eaa-b85a-1b32eff33259" />
+
+
 #### 3. Couette channel
 
 - **Geometry / BC.** Strip $N\times N$, **periodic in $x$**; bottom row a static
@@ -353,6 +360,9 @@ with $L_{\text{ch}}$ the characteristic length named below.
 - **Compared to.** The exact linear profile $u(s)=Us$ (relative $L_2$).
 - **Result.** $L_2=$ **0.03 %** ($H=32$) — the cleanest case, since a linear
   profile is reproduced almost exactly.
+
+  <img width="1919" height="975" alt="image" src="https://github.com/user-attachments/assets/276c6650-2f19-40e3-8f7d-ada1a68f17ea" />
+
 
 For the channel and cavity cases the wall planes lie at $y=1/2$ and $y=N-3/2$,
 and the macroscopic fields of wall cells are ghost-filled,
@@ -378,6 +388,8 @@ so that bilinear sampling reads exactly the wall velocity on the wall plane.
 - **Result.** $\mathrm{Re}=100$: $L_2=$ **0.5 %** and **2.4 %** (for $u$ and
   $v$); $\mathrm{Re}=1000$: **1.5 %** and **2.1 %**.
 
+<img width="1919" height="967" alt="image" src="https://github.com/user-attachments/assets/9b777b61-0be8-4388-8dc8-88a0f06ba27b" />
+
 #### 5. Cylinder in a channel (Kármán vortex street)
 
 - **Geometry / BC.** Channel $3N\times N$ (e.g. $384\times128$) with static
@@ -398,6 +410,8 @@ so that bilinear sampling reads exactly the wall velocity on the wall plane.
   small confinement shifts it slightly.
 - **Result.** **$\mathrm{St}=0.1637$**, $C_d=1.33$, $C_l$ amplitude $0.28$.
 
+<img width="1919" height="814" alt="image" src="https://github.com/user-attachments/assets/b54b2c2b-4a37-4936-89a7-6ead09629ed9" />
+
 #### 6. Backward-facing step
 
 - **Geometry / BC.** Channel $4N\times N$ (e.g. $512\times128$) with a **sudden
@@ -414,6 +428,8 @@ so that bilinear sampling reads exactly the wall velocity on the wall plane.
 - **Compared to.** The experimental/computational data of **Armaly et al.
   (1983)** for the 2-D laminar regime.
 - **Result.** **$x_r/S=4.18$** at $\mathrm{Re}=200$, within the reported range.
+
+<img width="1919" height="769" alt="image" src="https://github.com/user-attachments/assets/672ae521-3289-4d83-b438-d91b68bb3c61" />
 
 #### 7. Porous medium (Darcy flow)
 
@@ -440,6 +456,8 @@ so that bilinear sampling reads exactly the wall velocity on the wall plane.
   doubles as a ready-made acceptance target for a two-relaxation-time (TRT)
   upgrade, which pins the wall for all $\tau$ via the magic parameter
   $\Lambda=\tfrac{3}{16}$.
+
+<img width="1919" height="963" alt="image" src="https://github.com/user-attachments/assets/691178e5-0ce5-4abe-9ea9-61c811cdbb8a" />
 
 ### 3.4 Throughput: CPU vs GPU
 
